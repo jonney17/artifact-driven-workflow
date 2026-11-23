@@ -74,7 +74,17 @@ export class FakeGitLab implements GitLabApi {
     this.calls.push(`thread ${project}!${iid}`);
   }
 
+  readonly jobs = new Map<string, import('./api').JobRun>();
+
+  async latestJob(project: string, ref: string, job: string) {
+    return this.jobs.get(`${project}|${ref}|${job}`);
+  }
+
   // ---- humans and CI ----
+  job(project: string, ref: string, job: string, status: PipelineStatus, finishedAt = new Date().toISOString()) {
+    this.jobs.set(`${project}|${ref}|${job}`, { status, finishedAt });
+  }
+
   pipeline(project: string, branch: string, status: PipelineStatus, sha = 'abc123') {
     const mr = this.mrs.find((m) => m.project === project && m.sourceBranch === branch && m.state === 'opened');
     if (mr) {
@@ -87,8 +97,10 @@ export class FakeGitLab implements GitLabApi {
     this.must(project, iid).approvedBy.push(user);
   }
 
-  merge(project: string, iid: number) {
-    this.must(project, iid).state = 'merged';
+  merge(project: string, iid: number, at = new Date().toISOString()) {
+    const mr = this.must(project, iid);
+    mr.state = 'merged';
+    mr.mergedAt = at;
   }
 
   conflict(project: string, iid: number) {

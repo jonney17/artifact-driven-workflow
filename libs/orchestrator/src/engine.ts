@@ -1,12 +1,12 @@
-import { type Artifact, artifactId } from '@sdlc/contracts';
-import type { AttemptResult, OutputDraft, Runner } from '@sdlc/runtimes';
+import type { Artifact } from '@sdlc/contracts';
+import type { AttemptResult, Runner } from '@sdlc/runtimes';
 import { type EventLog, replay, type StoryReplay } from './recovery';
 import type { ResolvedContract, ResolvedWorkflow } from './resolve';
 import { findStale } from './stale';
 import { type ArtifactStore, pin } from './store';
 import { collectInputs, type Decision, evaluate, isReworkFor } from './trigger';
 import { checkWriteScope, parseSensitiveChanges } from './writescope';
-import { validateOutput } from './validate';
+import { planOutputs } from './outputs';
 import { Semaphore } from './semaphore';
 
 /** Provides a fresh git worktree per attempt (plan §2). */
@@ -24,6 +24,14 @@ export interface EngineOptions {
   maxFailures?: number;
   /** Shared session slots for the whole machine; defaults to `limits.concurrency`. */
   slots?: Semaphore;
+  /** Environments the engine starts around attempts of contracts that name one (plan §4a). */
+  environments?: Record<string, Environment>;
+}
+
+/** Something the engine starts before an attempt and stops after it, e.g. the local stack for QE (c). */
+export interface Environment {
+  /** Starts (or joins) the environment; resolves to a release function. Throws if it can't start. */
+  acquire(ctx: { story: string; instance: string; repos: string[] }): Promise<() => Promise<void>>;
 }
 
 export interface StoryInput {
@@ -151,6 +159,39 @@ export class Engine {
   }
 
   /** Inputs for a resumed session: the instance's current inputs plus its open rework. */
+  /**
+   * A human passes a gate on an artifact (plan §2 "Gates"): role-checked by the caller (CLI, Web UI or
+   * Jira sync) against `members`. The artifact must be waiting for it (status `ready`).
+   */
+  async passGate(story: string, artifactId: string, by: string): Promise<void> {
+    const a = await this.o.store.get(story, artifactId);
+    if (!a) throw new Error(`${artifactId} not found`);
+    if (a.envelope.status !== 'ready') throw new Error(`${artifactId} is ${a.envelope.status}, not waiting for a gate`);
+    await this.o.store.setStatus(story, artifactId, 'approved');
+    await this.o.events.append({ id: `gate:${artifactId}:v${a.envelope.version}:pass`, story, type: 'gate.passed', data: { artifact: artifactId, version: a.envelope.version, by } });
+  }
+
+  /** A human rejects a gate: the artifact becomes `rejected` and its producer gets `<type>-feedback` as rework. */
+  async rejectGate(story: string, artifactId: string, by: string, feedback: string): Promise<void> {
+    const a = await this.o.store.get(story, artifactId);
+    if (!a) throw new Error(`${artifactId} not found`);
+    await this.o.store.setStatus(story, artifactId, 'rejected');
+    const type = `${a.envelope.type}-feedback`;
+    const base = `${type}-${story}${a.envelope.repo ? `-${a.envelope.repo}` : ''}`;
+    const n = (await this.o.store.list(story)).filter((x) => x.envelope.id.startsWith(`${base}-`)).length + 1;
+    await this.o.store.write({
+      id: `${base}-${n}`,
+      type,
+      status: 'open',
+      produced_by: `human:${by}`,
+      story,
+      ...(a.envelope.repo ? { repo: a.envelope.repo } : {}),
+      derived_from: [pin(a)],
+      body: `# Gate rejected: ${artifactId} v${a.envelope.version}\n\n${feedback}\n`,
+    });
+    await this.o.events.append({ story, type: 'gate.rejected', data: { artifact: artifactId, version: a.envelope.version, by } });
+  }
+
   private currentInputs(story: StoryInput, rc: ResolvedContract, repo: string | undefined, artifacts: Artifact[], stale: Set<string>) {
     const inputs = collectInputs(rc.contract, story.key, repo, artifacts, stale, story.repos);
     if ('missing' in inputs) return undefined;
@@ -180,7 +221,20 @@ export class Engine {
       });
       const workdir = await this.worktrees.prepare({ instance: d.instance, story, ...(d.repo ? { repo: d.repo } : {}), attempt });
       const repoCfg = d.repo ? workflow.overlay.repos[d.repo] : undefined;
-      const result = await runner.run({
+      let release: (() => Promise<void>) | undefined;
+      if (c.environment) {
+        const env = this.o.environments?.[c.environment];
+        try {
+          if (!env) throw new Error(`environment ${c.environment} is not configured`);
+          release = await env.acquire({ story, instance: d.instance, repos: [...new Set(d.inputs.flatMap((a) => (a.envelope.repo ? [a.envelope.repo] : [])))] });
+        } catch (e) {
+          await events.append({ story, instance: d.instance, attempt, type: 'attempt.failed', data: { reason: `environment ${c.environment}: ${(e as Error).message}`, environment: true } });
+          await this.escalateIfNeeded(story, d.instance, state, 'environment failed');
+          return { instance: d.instance, attempt, result: 'failed', resumed };
+        }
+      }
+      const result = await runner
+        .run({
         instance: d.instance,
         contractId: c.id,
         agent: c.agent,
@@ -198,7 +252,8 @@ export class Engine {
           writeDeny: c.write_deny,
         },
         ...(resumeSessionId ? { resumeSessionId } : {}),
-      });
+        })
+        .finally(() => release?.());
       const base = { story, instance: d.instance, attempt, session_id: result.sessionId };
 
       if (result.status === 'waiting') {
@@ -211,8 +266,15 @@ export class Engine {
         return { instance: d.instance, attempt, result: 'failed', resumed };
       }
 
-      const drafts = new Map<string, OutputDraft>(result.outputs.map((o) => [`${o.type}|${o.repo ?? ''}`, o]));
-      const issues = c.outputs.flatMap((o) => validateOutput(o, drafts.get(`${o.type}|${o.scope === 'repo' ? (d.repo ?? '') : ''}`)?.body));
+      const existing = await store.list(story);
+      const { issues, writes } = planOutputs({
+        contract: c,
+        gateMode: d.contract.gateMode,
+        story,
+        ...(d.repo ? { instanceRepo: d.repo } : {}),
+        drafts: result.outputs,
+        existing,
+      });
       if (issues.length) {
         await events.append({ ...base, type: 'validation.failed', data: { issues } });
         await this.escalateIfNeeded(story, d.instance, state, 'validation failed');
@@ -234,25 +296,37 @@ export class Engine {
         return { instance: d.instance, attempt, result: 'rejected', resumed };
       }
 
-      const derived = [...d.inputs, ...d.reworkInputs].map(pin);
-      for (const o of c.outputs) {
-        const repo = o.scope === 'repo' ? d.repo : undefined;
-        const draft = drafts.get(`${o.type}|${repo ?? ''}`);
-        if (!draft) continue;
+      // Only regular inputs are pinned. Rework inputs are one-shot (marked consumed below); pinning them
+      // would make the output stale as soon as the reviewer re-runs on it (a cycle through the review).
+      const derived = d.inputs.map(pin);
+      for (const w of writes) {
         const written = await store.write({
-          id: artifactId(o.type, story, repo),
-          type: o.type,
-          status: o.status,
+          id: w.id,
+          type: w.type,
+          status: w.status,
           produced_by: `${c.id}#${attempt}`,
           story,
-          ...(repo ? { repo } : {}),
+          ...(w.repo ? { repo: w.repo } : {}),
           derived_from: derived,
-          body: draft.body,
+          body: w.body,
         });
-        await events.append({ ...base, type: 'artifact.written', data: { artifact: written.envelope.id, version: written.envelope.version } });
+        await events.append({ ...base, type: 'artifact.written', data: { artifact: written.envelope.id, version: written.envelope.version, status: w.status } });
+        if (w.rework) {
+          const r = await store.write({
+            id: w.rework.id,
+            type: w.rework.type,
+            status: 'open',
+            produced_by: `${c.id}#${attempt}`,
+            story,
+            ...(w.rework.repo ? { repo: w.rework.repo } : {}),
+            derived_from: [pin(written)],
+            body: w.body,
+          });
+          await events.append({ ...base, type: 'artifact.written', data: { artifact: r.envelope.id, version: r.envelope.version, status: 'open' } });
+        }
       }
       for (const r of d.reworkInputs) await store.setStatus(story, r.envelope.id, 'consumed');
-      await events.append({ ...base, type: 'attempt.finished', data: { ai_credits: result.aiCredits ?? null, changed_files: result.changedFiles.length } });
+      await events.append({ ...base, type: 'attempt.finished', data: { ai_credits: result.aiCredits ?? null, changed_files: result.changedFiles.length, consumed: d.reworkInputs.map((r) => r.envelope.id) } });
       return { instance: d.instance, attempt, result: 'done', resumed };
     } finally {
       this.running.delete(d.instance);

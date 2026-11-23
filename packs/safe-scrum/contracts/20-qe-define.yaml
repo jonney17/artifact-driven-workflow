@@ -1,0 +1,18 @@
+# QE (a): define the test cases, in parallel with the Planner. Approved with the proposal (plan §4a).
+id: qe-define
+agent: qe
+inputs:
+  - {type: story}
+  - {type: topic-prd, optional: true}
+  - {type: explore}
+rework_inputs:
+  - {type: test-scenarios-feedback, scope: story}
+outputs:
+  - type: test-scenarios
+    scope: repo
+    multiple: true
+    required_sections: [Scenarios, AC coverage]
+workdir: workspace
+write_allow: []
+tools: [read, search, ask_human]
+gate: scenario_approval

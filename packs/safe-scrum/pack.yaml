@@ -1,0 +1,40 @@
+# Pack safe-scrum@1: the team-neutral process (plan §1, §4). Owner: the SM (Q16).
+# Teams adapt it through their overlay (.sdlc/team/), which may change how agents work but never
+# what they consume or produce.
+name: safe-scrum
+version: 1
+description: SAFe Scrum story flow with ATDD QE, per-repo Developers, Code Reviewer and Coach.
+
+agents:
+  planner:   {prompt: agents/planner.md}
+  qe:        {prompt: agents/qe.md}
+  developer: {prompt: agents/developer.md}
+  reviewer:  {prompt: agents/reviewer.md}
+  coach:     {prompt: agents/coach.md}
+
+# Artifacts only the engine writes (from Jira, Confluence, GitLab, humans); agents read them.
+engine_artifacts:
+  story: Jira story (fenced), new version when Jira content changes
+  topic-prd: Confluence PRD snapshot of the Epic, new version per page version
+  split-ref: read-only reference to the original story of a split
+  mr: the Draft MR of a Story × repo; status pipeline_green | pipeline_running | pipeline_failed
+  pipeline-failure: rework for the Developer when the MR pipeline is red
+  rebase: rework for the Developer when the MR can't merge cleanly
+  merged: all MRs of the story merged and main deployed to preprod (status merged)
+  answer: a human answer to an ask_human question
+  "*-feedback": a rejected gate's feedback for the producer (proposal-feedback, …)
+
+# Jira status per story, derived from artifacts; first match wins (most advanced first).
+# Keys refer to team.yaml jira.status_map.
+jira_status:
+  - {status: done, when: [{type: preprod-check, status: [passed]}]}
+  - {status: ready_for_acceptance, when: [{type: story-acceptance, status: [ready, approved]}]}
+  - {status: in_qa, when: [{type: review, status: [approved], every_repo: true}]}
+  - {status: in_review, when: [{type: code, every_repo: true}]}
+  - {status: in_progress, when: [{type: proposal, status: [approved]}]}
+  - {status: refining, when: [{type: story}]}
+
+# Coach (plan §7) runs outside the artifact flow: (a) after each session outcome, (b) on recurring findings.
+coach:
+  session_retro: {prompt: agents/coach.md, template: templates/session-retro.md}
+  improvement: {template: templates/overlay-change.md}

@@ -16,6 +16,13 @@ export interface MergeRequest {
   /** `can_be_merged`, `cannot_be_merged` (conflict), … */
   mergeStatus?: string;
   approvedBy: string[];
+  mergedAt?: string;
+}
+
+export interface JobRun {
+  status: PipelineStatus;
+  sha?: string;
+  finishedAt?: string;
 }
 
 export interface MrNote {
@@ -49,4 +56,6 @@ export interface GitLabApi {
   listNotes(project: string, iid: number): Promise<MrNote[]>;
   /** A discussion thread (comment), never an approval. */
   createThread(project: string, iid: number, body: string): Promise<void>;
+  /** The latest run of a CI job on a ref, e.g. `deploy_preprod` on `main` (Q19). */
+  latestJob(project: string, ref: string, job: string): Promise<JobRun | undefined>;
 }

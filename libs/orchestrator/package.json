@@ -10,7 +10,8 @@
     "@sdlc/contracts": "workspace:*",
     "@sdlc/runtimes": "workspace:*",
     "picomatch": "^4.0.0",
-    "yaml": "^2.8.0"
+    "yaml": "^2.8.0",
+    "zod": "^4.0.0"
   },
   "devDependencies": { "@types/picomatch": "^4.0.0" }
 }

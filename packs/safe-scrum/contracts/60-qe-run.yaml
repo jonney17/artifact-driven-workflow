@@ -1,0 +1,20 @@
+# QE (c): run & judge locally, once every repo is review-approved and the test code is written.
+# The engine starts the local stack (environment local_stack); the agent never controls Docker.
+id: qe-run
+agent: qe
+inputs:
+  - {type: story}
+  - {type: review, scope: any, status: [approved]}
+  - {type: test-code, scope: any}
+  - {type: test-scenarios, scope: any, status: [approved]}
+outputs:
+  - type: story-acceptance
+    required_sections: [AC matrix, Evidence, Failures]
+    verdicts:
+      pass: {status: ready}
+      fail: {status: failed}
+  - {type: defect, scope: repo, multiple: true, numbered: true, optional: true, status: open, required_sections: [Expected, Actual, Steps]}
+write_allow: []
+tools: [read, search, shell:acceptance, shell:e2e, ask_human]
+environment: local_stack
+gate: story_acceptance

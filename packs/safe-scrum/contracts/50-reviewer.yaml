@@ -1,0 +1,17 @@
+# Code Reviewer: starts on a green MR pipeline. Findings become MR threads (by the engine), never approvals.
+id: reviewer
+agent: reviewer
+fan_out: repo
+inputs:
+  - {type: code, scope: repo}
+  - {type: mr, scope: repo, status: [pipeline_green]}
+  - {type: proposal, scope: repo, status: [approved]}
+outputs:
+  - type: review
+    scope: repo
+    required_sections: [Findings]
+    verdicts:
+      approved: {status: approved}
+      changes_requested: {status: changes_requested, rework: review-finding}
+write_allow: []
+tools: [read, search]

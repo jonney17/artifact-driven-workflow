@@ -1,0 +1,17 @@
+# Preprod check after merge (Q10): AC-tagged smoke + regression on preprod, under the team lease.
+id: qe-preprod
+agent: qe
+inputs:
+  - {type: story}
+  - {type: story-acceptance, status: [approved]}
+  - {type: merged, status: [merged]}
+outputs:
+  - type: preprod-check
+    required_sections: [Results]
+    verdicts:
+      pass: {status: passed}
+      fail: {status: failed}
+  - {type: defect, scope: repo, multiple: true, numbered: true, optional: true, status: open, required_sections: [Expected, Actual, Steps]}
+write_allow: []
+tools: [read, search, shell:smoke]
+environment: preprod

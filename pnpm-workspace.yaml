@@ -1,5 +1,6 @@
 packages:
   - "libs/*"
   - "apps/*"
+  - "packs/*"
 allowBuilds:
   nx: true

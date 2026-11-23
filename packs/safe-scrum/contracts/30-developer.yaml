@@ -1,0 +1,18 @@
+# Developer: one per Story × repo (team-apply). Never writes test_dirs; QE (b) owns them.
+id: developer
+agent: developer
+fan_out: repo
+inputs:
+  - {type: proposal, scope: repo, status: [approved]}
+  - {type: test-scenarios, scope: repo, status: [approved]}
+rework_inputs:
+  - {type: review-finding, scope: repo, limit: review_rounds}
+  - {type: defect, scope: repo, limit: defect_rounds}
+  - {type: pipeline-failure, scope: repo}
+  - {type: rebase, scope: repo}
+outputs:
+  - {type: code, scope: repo, required_sections: [Summary, Changes, Self-check]}
+  - {type: mr-description, scope: repo, required_sections: [Summary, AC covered, Interfaces touched, Assumptions, How to test]}
+write_allow: ["**"]
+write_deny: ["${test_dirs}/**", ".sdlc/**", ".github/agents/**"]
+tools: [read, edit, search, shell:build, shell:unit, ask_human]

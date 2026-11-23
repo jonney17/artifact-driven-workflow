@@ -1,0 +1,13 @@
+# QE (b): write the automated tests against the agreed interfaces, in parallel with the Developer.
+id: qe-write
+agent: qe
+fan_out: repo
+inputs:
+  - {type: proposal, scope: repo, status: [approved]}
+  - {type: test-scenarios, scope: repo, status: [approved]}
+rework_inputs:
+  - {type: test-fix, scope: repo, limit: defect_rounds}
+outputs:
+  - {type: test-code, scope: repo, required_sections: [Tests written, Dry run]}
+write_allow: ["${test_dirs}/**"]
+tools: [read, edit, search, shell:test-dry-run, ask_human]

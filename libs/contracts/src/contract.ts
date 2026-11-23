@@ -30,6 +30,14 @@ export const ContractOutputSchema = z.object({
   required_sections: z.array(z.string()).default([]),
   /** Status the engine gives a valid output. */
   status: z.string().default('ready'),
+  /** The agent may emit several, one per repo (e.g. the Planner's proposal per affected repo). */
+  multiple: z.boolean().default(false),
+  /** Each emitted artifact gets the next free number in its id (e.g. `defect-PAY-1-api-2`). */
+  numbered: z.boolean().default(false),
+  /** Not producing it is fine (e.g. defects when everything passes). */
+  optional: z.boolean().default(false),
+  /** `Verdict: <value>` in the body sets the status, and may emit a rework input of the given type. */
+  verdicts: z.record(z.string(), z.object({ status: z.string(), rework: z.string().optional() })).optional(),
 });
 export type ContractOutput = z.infer<typeof ContractOutputSchema>;
 
@@ -47,6 +55,8 @@ export const ContractSchema = z.object({
   write_deny: z.array(z.string()).default([]),
   tools: z.array(z.string()).default([]),
   gate: z.string().nullable().default(null),
+  /** An environment the engine starts around each attempt (e.g. `local_stack` for QE (c), `preprod`). Never an agent tool. */
+  environment: z.string().optional(),
 });
 export type Contract = z.infer<typeof ContractSchema>;
 
@@ -60,4 +70,5 @@ export const PROTECTED_CONTRACT_FIELDS = [
   'write_allow',
   'write_deny',
   'tools',
+  'environment',
 ] as const;

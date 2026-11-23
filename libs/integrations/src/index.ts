@@ -12,3 +12,4 @@ export * from './gitlab/fake';
 export * from './gitlab/graphql';
 export * from './gitlab/mr-sync';
 export * from './inbound';
+export * from './story-sync';

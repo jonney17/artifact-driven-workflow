@@ -1,6 +1,6 @@
 import type { GitLabApi, MergeRequest, MrNote, NewMr } from './api';
 
-const MR_FIELDS = `iid title description state draft webUrl sourceBranch targetBranch diffHeadSha detailedMergeStatus
+const MR_FIELDS = `iid title description state draft webUrl sourceBranch targetBranch diffHeadSha detailedMergeStatus mergedAt
   labels { nodes { title } } headPipeline { status path } approvedBy { nodes { username } }`;
 
 type Raw = Record<string, any>;
@@ -53,6 +53,7 @@ export class GitLabGraphqlClient implements GitLabApi {
       ...(n.headPipeline ? { pipeline: { status: String(n.headPipeline.status).toLowerCase() as never, webUrl: n.headPipeline.path } } : {}),
       ...(n.detailedMergeStatus ? { mergeStatus: String(n.detailedMergeStatus).toLowerCase() } : {}),
       approvedBy: (n.approvedBy?.nodes ?? []).map((u: Raw) => u.username),
+      ...(n.mergedAt ? { mergedAt: n.mergedAt } : {}),
     };
   }
 
@@ -113,6 +114,18 @@ export class GitLabGraphqlClient implements GitLabApi {
       i: String(iid),
     });
     return d.project?.mergeRequest?.notes?.nodes ?? [];
+  }
+
+  async latestJob(project: string, ref: string, job: string) {
+    const d = await this.gql(
+      `query($p: ID!, $r: String!) { project(fullPath: $p) { pipelines(ref: $r, first: 5) { nodes { sha jobs { nodes { name status finishedAt } } } } } }`,
+      { p: project, r: ref },
+    );
+    for (const pl of d.project?.pipelines?.nodes ?? []) {
+      const j = (pl.jobs?.nodes ?? []).find((x: Raw) => x.name === job);
+      if (j) return { status: String(j.status).toLowerCase() as never, sha: pl.sha, finishedAt: j.finishedAt ?? undefined };
+    }
+    return undefined;
   }
 
   async createThread(project: string, iid: number, body: string) {

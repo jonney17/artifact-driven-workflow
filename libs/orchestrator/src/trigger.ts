@@ -1,4 +1,4 @@
-import { type Artifact, artifactId, type Contract, type Limits } from '@sdlc/contracts';
+import { type Artifact, artifactId, type Contract, type ContractOutput, type Limits } from '@sdlc/contracts';
 import type { ResolvedContract } from './resolve';
 
 export function instanceKey(contractId: string, story: string, repo?: string): string {
@@ -88,11 +88,10 @@ export function evaluate(args: EvaluateArgs): Decision[] {
         continue;
       }
 
-      const outputIds = c.outputs.map((o) => artifactId(o.type, story.key, o.scope === 'repo' ? repo : undefined));
-      const outputs = outputIds.map((id) => artifacts.find((a) => a.envelope.id === id));
+      const produced = c.outputs.map((o) => ({ o, found: existingOutputs(o, story.key, repo, artifacts) }));
       let reason: 'output missing' | 'output stale' | 'rework' | undefined;
-      if (outputs.some((o) => !o)) reason = 'output missing';
-      else if (outputIds.some((id) => stale.has(id))) reason = 'output stale';
+      if (produced.some(({ o, found }) => !o.optional && found.length === 0)) reason = 'output missing';
+      else if (produced.some(({ found }) => found.some((a) => stale.has(a.envelope.id)))) reason = 'output stale';
       else if (openRework.length > 0) reason = 'rework';
 
       if (reason) decisions.push({ ...base, action: 'run', reason, inputs: inputs.artifacts, reworkInputs: openRework });
@@ -100,6 +99,16 @@ export function evaluate(args: EvaluateArgs): Decision[] {
     }
   }
   return decisions;
+}
+
+/** Artifacts already produced for one output of an instance. Multiple/numbered outputs match by type (and repo). */
+export function existingOutputs(o: ContractOutput, story: string, repo: string | undefined, artifacts: Artifact[]): Artifact[] {
+  const id = artifactId(o.type, story, o.scope === 'repo' ? repo : undefined);
+  return artifacts.filter((a) => {
+    if (a.envelope.type !== o.type || a.envelope.story !== story || a.envelope.status === 'cancelled') return false;
+    if (!o.multiple && !o.numbered) return a.envelope.id === id;
+    return o.scope !== 'repo' || !repo || a.envelope.repo === repo;
+  });
 }
 
 /** The usable inputs of one instance, or the first input type that isn't satisfied yet. */

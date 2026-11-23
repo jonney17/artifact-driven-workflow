@@ -23,6 +23,8 @@ export const EngineEventSchema = z.object({
     'validation.failed',
     'instance.blocked',
     'instance.unblocked',
+    'gate.passed',
+    'gate.rejected',
     'takeover.started',
     'takeover.ended',
   ]),

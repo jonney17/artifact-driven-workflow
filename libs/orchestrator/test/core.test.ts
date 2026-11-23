@@ -7,7 +7,7 @@ import { checkWriteScope, expandPatterns, parseSensitiveChanges } from '../src/w
 import { validateOutput } from '../src/validate';
 import { replay } from '../src/recovery';
 import { leaseState } from '../src/lease';
-import type { Artifact, EngineEvent } from '@sdlc/contracts';
+import { type Artifact, ContractOutputSchema, type EngineEvent } from '@sdlc/contracts';
 import { baseOverlay, PROPOSAL, tempDir, testWorkflow } from './fixtures';
 
 const art = (id: string, type: string, status: string, body = id, extra: Partial<Artifact['envelope']> = {}): Artifact => ({
@@ -169,7 +169,7 @@ describe('write scope', () => {
 });
 
 describe('output validation', () => {
-  const out = { type: 'proposal', scope: 'story' as const, status: 'ready', required_sections: ['Interfaces & test hooks', 'Sensitive changes'] };
+  const out = ContractOutputSchema.parse({ type: 'proposal', required_sections: ['Interfaces & test hooks', 'Sensitive changes'] });
   it('requires the sections the contract names', () => {
     expect(validateOutput(out, PROPOSAL)).toEqual([]);
     expect(validateOutput(out, '# Proposal\n## Sensitive changes\nnone')).toEqual([{ type: 'proposal', message: 'missing required section "Interfaces & test hooks"' }]);
