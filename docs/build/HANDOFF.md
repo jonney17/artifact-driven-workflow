@@ -33,7 +33,7 @@ pnpm typecheck           # nx run-many -t typecheck (11 projects)
 pnpm test                # nx run-many -t test (Vitest), about 3 minutes
 pnpm --filter @sdlc/web build    # the Angular UI → apps/web/dist
 pnpm --filter @sdlc/cli build    # the CLI bundle → apps/cli/dist/sdlc.mjs
-node apps/cli/dist/sdlc.mjs demo --serve   # a whole story on fakes, then the UI on http://127.0.0.1:4317
+node apps/cli/dist/sdlc.mjs demo --serve   # a whole story on fakes, then the UI on http://127.0.0.1:7317
 ```
 
 - **Requirements:** Node ≥ 22 (built on 24.13), git on the PATH. pnpm 12, TypeScript 7 for the engine, TypeScript 6.0 for the UI only, Vitest 5, Nx 24, Angular 21.2.

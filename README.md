@@ -14,7 +14,7 @@ This repo is also the `sdlc-engine` Nx monorepo from plan §9. Plan steps 2–8 
 corepack enable && pnpm install
 pnpm typecheck && pnpm test
 pnpm --filter @sdlc/web build && pnpm --filter @sdlc/cli build
-node apps/cli/dist/sdlc.mjs demo --serve   # one story from Jira to Done on fakes, then the UI on http://127.0.0.1:4317
+node apps/cli/dist/sdlc.mjs demo --serve   # one story from Jira to Done on fakes, then the UI on http://127.0.0.1:7317
 ```
 
 Layout: `libs/` (contracts, runtimes, orchestrator, integrations, hostgen, retro, app), `apps/` (cli, server, web), `packs/safe-scrum`, `examples/overlays`, `skills/sdlc`. Details: [HANDOFF.md](docs/build/HANDOFF.md) §3.

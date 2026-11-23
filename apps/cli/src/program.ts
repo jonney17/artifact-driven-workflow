@@ -260,19 +260,19 @@ export function program(io: CliIO = { out: console.log, err: console.error }): C
 
   p.command('demo')
     .description('run one story from Jira to Done on this machine with fake Jira/GitLab and scripted agents')
-    .option('--serve [port]', 'then keep the Web UI running on the demo data', (v) => Number(v))
+    .option('--serve [port]', 'then keep the Web UI running on the demo data (default port 7317)', (v) => Number(v))
     .action(async (o: { serve?: number | boolean }) => {
       const d = await runDemo(io.out);
       if (o.serve) {
         const { startServer } = await import('./serve');
-        await startServer(d.ctx, typeof o.serve === 'number' ? o.serve : 4317, io.out);
+        await startServer(d.ctx, typeof o.serve === 'number' ? o.serve : undefined, io.out);
       }
     });
 
   p.command('serve')
     .description('start the local API and Web UI (only the story owner can reach it)')
-    .option('--port <port>', 'port', (v) => Number(v), 4317)
-    .action(async (o: { port: number }) => {
+    .option('--port <port>', 'port (default 7317)', (v) => Number(v))
+    .action(async (o: { port?: number }) => {
       const { startServer } = await import('./serve');
       await startServer(await ctx(), o.port, io.out);
     });

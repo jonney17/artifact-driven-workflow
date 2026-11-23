@@ -1,5 +1,6 @@
 import 'reflect-metadata';
 import { existsSync } from 'node:fs';
+import { type AddressInfo, createServer as createNetServer } from 'node:net';
 import { join, resolve } from 'node:path';
 import { type INestApplication, Module, type DynamicModule } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
@@ -39,11 +40,32 @@ export async function createServer(ctx: SdlcContext, opts: { webDir?: string; lo
   return app;
 }
 
-/** `sdlc serve`: the local API + Web UI, on 127.0.0.1 only (local mode: only the story owner reaches it). */
-export async function startServer(ctx: SdlcContext, port: number, out: (l: string) => void = console.log): Promise<INestApplication> {
+/** Default port of `sdlc serve`. Not 4317: that is the OTLP port, often taken or reserved by the OS. */
+export const DEFAULT_PORT = 7317;
+
+/** True when 127.0.0.1:<port> can be bound. Windows answers EACCES for ports in an excluded range. */
+function portFree(port: number): Promise<boolean> {
+  return new Promise((done) => {
+    const probe = createNetServer();
+    probe.once('error', () => done(false));
+    probe.listen(port, '127.0.0.1', () => probe.close(() => done(true)));
+  });
+}
+
+/**
+ * `sdlc serve`: the local API + Web UI, on 127.0.0.1 only (local mode: only the story owner reaches it).
+ * If the port is in use or reserved, it falls back to a free port and says so.
+ */
+export async function startServer(ctx: SdlcContext, port: number = DEFAULT_PORT, out: (l: string) => void = console.log): Promise<INestApplication> {
+  let use = port;
+  if (port !== 0 && !(await portFree(port))) {
+    out(`port ${port} is in use or reserved by the OS; using a free port instead (pick one with --port)`);
+    use = 0;
+  }
   const app = await createServer(ctx);
-  await app.listen(port, '127.0.0.1');
-  out(`sdlc UI and API on http://127.0.0.1:${port} as ${ctx.local.user}`);
+  await app.listen(use, '127.0.0.1');
+  const bound = (app.getHttpServer().address() as AddressInfo).port;
+  out(`sdlc UI and API on http://127.0.0.1:${bound} as ${ctx.local.user}`);
   return app;
 }
 

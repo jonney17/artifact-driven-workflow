@@ -1,7 +1,7 @@
 import type { AddressInfo } from 'node:net';
 import { describe, expect, it } from 'vitest';
 import { setupDemo } from '@sdlc/app';
-import { createServer } from '../src/index';
+import { createServer, startServer } from '../src/index';
 
 describe('local API (plan §8)', { timeout: 120_000 }, () => {
   it('serves the Board and inbox, passes a gate with the CSRF header, and checks roles', async () => {
@@ -42,6 +42,27 @@ describe('local API (plan §8)', { timeout: 120_000 }, () => {
       expect((await fetch(`${base}/stories/PAY-12/artifacts/nope`)).status).toBe(404);
     } finally {
       await app.close();
+    }
+  });
+});
+
+describe('startServer', { timeout: 120_000 }, () => {
+  it('falls back to a free port when the chosen one is taken or reserved (Windows: EACCES)', async () => {
+    const { createServer: netServer } = await import('node:net');
+    const blocker = netServer();
+    await new Promise<void>((r) => blocker.listen(0, '127.0.0.1', r));
+    const taken = (blocker.address() as AddressInfo).port;
+    const demo = await setupDemo();
+    const lines: string[] = [];
+    const app = await startServer(demo.ctx, taken, (l) => lines.push(l));
+    try {
+      const bound = (app.getHttpServer().address() as AddressInfo).port;
+      expect(bound).not.toBe(taken);
+      expect(lines[0]).toMatch(new RegExp(`^port ${taken} is in use or reserved`));
+      expect(lines[1]).toBe(`sdlc UI and API on http://127.0.0.1:${bound} as bob@demo`);
+    } finally {
+      await app.close();
+      blocker.close();
     }
   });
 });
