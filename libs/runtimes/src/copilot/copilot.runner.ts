@@ -29,6 +29,8 @@ export interface CopilotRunnerOptions {
   /** Permission decisions are logged here (plan §5b: every tool call is logged). */
   onPermission?: (instance: string, req: unknown, allowed: boolean, reason: string) => void;
   env?: NodeJS.ProcessEnv;
+  /** Extra session env per attempt, e.g. the OTLP settings (plan §7). Must never carry credentials. */
+  extraEnv?: (req: AttemptRequest) => Record<string, string>;
 }
 
 /**
@@ -88,7 +90,7 @@ export class CopilotRunner implements Runner {
       agent: `sdlc-${req.agent}`,
       cwd: req.workdir,
       ...(req.policy.model ? { model: req.policy.model } : {}),
-      env: sessionEnv(this.o.env ?? process.env, proxy ? { proxyUrl: proxy.url } : {}),
+      env: sessionEnv(this.o.env ?? process.env, { ...(proxy ? { proxyUrl: proxy.url } : {}), ...(this.o.extraEnv ? { extra: this.o.extraEnv(req) } : {}) }),
       tools,
       onPermissionRequest: async (p) => {
         const d = decidePermission(p, req.policy, req.workdir);

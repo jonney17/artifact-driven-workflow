@@ -30,7 +30,8 @@ gitlab: {url: https://gitlab.demo, token_ref: DEMO_GITLAB_TOKEN}
 security:
   sensitive_paths: ["**/pom.xml", ".gitlab-ci.yml"]
   network: {mode: off}
-runtime: {mode: local, owner: assignee, lease_ttl_minutes: 30}
+runtime: {mode: local, owner: assignee, lease_ttl_minutes: 30, workspace_repo: payments/payments-sdlc-workspace}
+improvement: {recurrence_threshold: 2}
 members: {"alice@demo": [po], "bob@demo": [dev], "chi@demo": [qe], "dan@demo": [sm]}
 limits: {review_rounds: 2, defect_rounds: 3, concurrency: 4, ai_credits_per_story: 4000}
 questions: {live_wait_minutes: 1}
@@ -71,7 +72,40 @@ export function demoRunner(): StubRunner {
         : done(sessionId, [{ type: 'review', body: doc('Review', { Findings: 'none' }, 'approved') }]),
     )
     .on('qe-run', (_r, { sessionId }) => done(sessionId, [{ type: 'story-acceptance', body: doc('Acceptance', { 'AC matrix': '| PAY-12-AC1 | InvoiceIT.create | pass |\n| PAY-12-AC2 | InvoiceIT.tax | pass |', Evidence: 'trace-PAY-12.zip', Failures: 'none' }, 'pass') }]))
-    .on('qe-preprod', (_r, { sessionId }) => done(sessionId, [{ type: 'preprod-check', body: doc('Preprod', { Results: 'smoke + regression green' }, 'pass') }]));
+    .on('qe-preprod', (_r, { sessionId }) => done(sessionId, [{ type: 'preprod-check', body: doc('Preprod', { Results: 'smoke + regression green' }, 'pass') }]))
+    .on('coach-session', (r, { sessionId }) => {
+      const s = JSON.parse(/```json\n([\s\S]*?)\n```/.exec(r.inputs[0]!.body)?.[1] ?? '{}') as { instance: string; attempt: number; agent: string; signals: string[]; signalDetail: Record<string, string> };
+      const body = [
+        `# Session retro: ${s.instance} attempt ${s.attempt}`,
+        '',
+        '## Outcome',
+        '',
+        `Signals: ${s.signals.join(', ') || 'story-level'}.`,
+        '',
+        '## Signals',
+        '',
+        ...Object.entries(s.signalDetail).map(([k, v]) => `- ${k}: ${v}`),
+        '',
+        '## Root cause',
+        '',
+        '- Root cause: missing-instruction',
+        `- Agent: ${s.agent}`,
+        `- Fix target: .sdlc/team/agents/${s.agent}/instructions.md`,
+        '',
+        '## Proposed change',
+        '',
+        'Add: "Run `mvn -q verify` and apply tax to discounted totals before finishing."',
+        '',
+      ].join('\n');
+      return done(sessionId, [{ type: 'session-retro', body }]);
+    })
+    .on('coach-improve', (r, { sessionId }) => {
+      const target = /- Fix target: (\S+)/.exec(r.inputs[0]!.body)?.[1] ?? '.sdlc/team/agents/developer/instructions.md';
+      return done(sessionId, [
+        { type: 'overlay-change', body: doc('Overlay change', { Evidence: 'Two retros: pipeline red and a review finding on tax.', Change: `Add a self-check line to ${target}.`, 'Expected effect': 'Primary metric: rework_rounds. Guardrails: AI credits, takeovers, defects.' }) },
+        { type: 'overlay-file', body: `path: ${target}\n\n- Before finishing, run \`mvn -q verify\` and check that tax applies to discounted totals.\n` },
+      ]);
+    });
 }
 
 export interface Demo {

@@ -5,7 +5,10 @@
   "type": "module",
   "main": "src/index.ts",
   "types": "src/index.ts",
-  "scripts": { "test": "vitest run", "typecheck": "tsc -p tsconfig.json" },
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc -p tsconfig.json"
+  },
   "dependencies": {
     "@sdlc/contracts": "workspace:*",
     "@sdlc/hostgen": "workspace:*",
@@ -13,6 +16,7 @@
     "@sdlc/orchestrator": "workspace:*",
     "@sdlc/runtimes": "workspace:*",
     "yaml": "^2.8.0",
-    "zod": "^4.0.0"
+    "zod": "^4.0.0",
+    "@sdlc/retro": "workspace:*"
   }
 }

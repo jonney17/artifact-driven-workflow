@@ -38,6 +38,36 @@ describe('the whole app on one machine (demo)', { timeout: 120_000 }, () => {
     expect(v.instances.find((i) => i.instance === 'developer:PAY-12:billing-api')).toMatchObject({ attempt: 3, state: 'idle' });
   });
 
+  it('self-improvement: session metrics, Coach retros on signals, story metrics + one Jira line, Coach (b) overlay MR', async () => {
+    const d = await runDemo(() => undefined);
+    const dir = join(d.ctx.workRoot, 'retro', 'PAY-12');
+    const files = (await import('node:fs/promises')).readdir(dir);
+    const names = await files;
+    // every settled session has metrics; only sessions with signals have a retro
+    expect(names.filter((f) => f.endsWith('.metrics.json')).length).toBeGreaterThanOrEqual(9);
+    expect(names.filter((f) => f.endsWith('.md')).sort()).toEqual(['session-developer_PAY-12_billing-api-1.md', 'session-developer_PAY-12_billing-api-2.md']); // a review asking for changes is no signal for the Reviewer
+    const m = JSON.parse(await readFile(join(d.ctx.store.storyDir('PAY-12'), 'story-metrics-PAY-12.json'), 'utf8'));
+    expect(m).toMatchObject({ outcome: 'done', quality: { reviewRoundsByRepo: { 'billing-api': 1 }, redPipelines: 1 }, effort: { sessions: 10 } });
+    const lines = (await d.jira.getComments('PAY-12')).filter((c) => /sessions · /.test(c.body));
+    expect(lines).toHaveLength(1);
+    expect(lines[0]!.body).toMatch(/^\[sdlc\] 10 sessions · 1 review round · 0 defects · 0 questions · /);
+
+    // more passes after Done: still exactly one Jira summary
+    await d.cycle();
+    expect((await d.jira.getComments('PAY-12')).filter((c) => /sessions · /.test(c.body))).toHaveLength(1);
+
+    // Coach (b): 2 matching findings for the developer → 1 overlay MR touching only .sdlc/team/
+    const r = await d.ctx.retro.improve();
+    expect(r.opened.map((i) => [i.agent, i.rootCause, i.fixTarget])).toEqual([['developer', 'missing-instruction', '.sdlc/team/agents/developer/instructions.md']]);
+    const mr = d.gitlab.mrs.find((x) => x.project === 'payments/payments-sdlc-workspace')!;
+    expect(mr.sourceBranch).toMatch(/^sdlc\/coach-developer-/);
+    const { stdout: changed } = await exec('git', ['diff', '--name-only', `main...${mr.sourceBranch}`], { cwd: join(d.dir, 'workspace.git') });
+    expect(changed.trim().split('\n').every((f) => f.startsWith('.sdlc/team/'))).toBe(true);
+    // one open Coach MR per agent: the developer's next finding waits
+    expect((await d.ctx.retro.improve()).opened.filter((i) => i.agent === 'developer')).toEqual([]);
+    expect((await d.ctx.retro.compare('developer', 'unknown-rev')).verdict).toBe('inconclusive');
+  });
+
   it('the inbox shows gates waiting for a human', async () => {
     const d = await setupDemo();
     await d.cycle();

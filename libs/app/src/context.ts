@@ -40,8 +40,12 @@ import {
   StorySync,
 } from '@sdlc/integrations';
 import { type AgentFile, buildAgentFiles, installAgent } from '@sdlc/hostgen';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
+import { otelEnv } from '@sdlc/retro';
 import { expandEnv, type LocalConfig } from './config';
 import { LocalStackEnvironment, PreprodEnvironment } from './environments';
+import { COACH_OUTPUTS, RetroService } from './retro-service';
 
 /** Team-level settings read by the app layer (the rest of team.yaml is validated by each lib). */
 const AppTeamSchema = z
@@ -100,7 +104,12 @@ export interface SdlcContext {
   sync: StorySync;
   loop: EngineLoop;
   agentFiles: AgentFile[];
+  /** The runner every agent session goes through (Copilot in production), also used by the Coach. */
+  engineRunner: Runner;
+  retro: RetroService;
   dryRun: boolean;
+  /** Where Copilot sessions send OTLP (set by `sdlc run` when it starts the local receiver). */
+  telemetry: { endpoint?: string };
   /** Story keys this engine has local state for. */
   knownStories(): Promise<string[]>;
 }
@@ -121,6 +130,9 @@ function jiraFromEnv(site: string, fieldNames: { acceptanceCriteria: string; top
  * `dryRun` (plan §2 "Dry run"): reads real systems, writes nothing outbound, artifacts in a scratch folder.
  */
 export async function createContext(local: LocalConfig, opts: { apis?: ContextApis; dryRun?: boolean; packsDir?: string } = {}): Promise<SdlcContext> {
+  const telemetry: { endpoint?: string } = {};
+  const exec = promisify(execFile);
+  const overlayRev = async () => exec('git', ['rev-parse', 'HEAD:.sdlc/team'], { cwd: local.workspace, windowsHide: true }).then((r) => r.stdout.trim(), () => undefined);
   const apis = opts.apis ?? {};
   const dryRun = !!opts.dryRun;
   const teamDir = join(local.workspace, '.sdlc', 'team');
@@ -198,7 +210,11 @@ export async function createContext(local: LocalConfig, opts: { apis?: ContextAp
     new CopilotRunner({
       sdk: apis.copilot ?? loadCopilotSdk,
       questions,
-      outputsOf: (id) => workflow.contracts.find((c) => c.contract.id === id)?.contract.outputs ?? [],
+      outputsOf: (id) => workflow.contracts.find((c) => c.contract.id === id)?.contract.outputs ?? COACH_OUTPUTS[id as keyof typeof COACH_OUTPUTS] ?? [],
+      extraEnv: (req) =>
+        telemetry.endpoint
+          ? otelEnv(telemetry.endpoint, { team: overlay.team, story: req.story, ...(req.repo ? { repo: req.repo } : {}), agent: req.agent, instance: req.instance, attempt: req.attempt })
+          : {},
       templates,
       decisions: async (story) => readFile(join(store.storyDir(story), 'decisions.md'), 'utf8').catch(() => ''),
       installAgent: (agent, workdir) => installAgent(agentFiles, teamDir, agent, workdir),
@@ -223,6 +239,7 @@ export async function createContext(local: LocalConfig, opts: { apis?: ContextAp
     slots: new Semaphore(overlay.limits.concurrency),
     environments,
     budget,
+    overlayRev,
   });
 
   const inbound = new JiraInbound(
@@ -262,11 +279,17 @@ export async function createContext(local: LocalConfig, opts: { apis?: ContextAp
         return items;
       },
       syncIn: (s) => sync.syncIn(s),
-      syncOut: (s, r) => sync.syncOut(s, r),
+      syncOut: async (s, r) => {
+        await sync.syncOut(s, r);
+        await ctx.retro.afterStory(s.key);
+      },
     },
   });
 
-  return { local, pack, workflow, team, teamDir, workRoot, store, events, engine, takeovers: new Takeovers(store, events), questions, budget, leases, ws, sync, loop, agentFiles, dryRun, knownStories };
+  const ctx = { local, pack, workflow, team, teamDir, workRoot, store, events, engine, takeovers: new Takeovers(store, events), questions, budget, leases, ws, sync, loop, agentFiles, engineRunner: runner, dryRun, telemetry, knownStories } as Omit<SdlcContext, 'retro'> as SdlcContext;
+  const workspaceProject = overlay.runtime.workspace_repo;
+  ctx.retro = new RetroService(ctx, { outbound, gitlab, ...(workspaceProject ? { workspaceProject } : {}) });
+  return ctx;
 }
 
 /** In a dry run the workspace repo is only read: pulls happen, pushes don't. */

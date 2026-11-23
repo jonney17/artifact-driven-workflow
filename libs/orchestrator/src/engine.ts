@@ -29,6 +29,8 @@ export interface EngineOptions {
   environments?: Record<string, Environment>;
   /** AI-credit limits (plan §5a). Without it, nothing is enforced. */
   budget?: BudgetGuard;
+  /** Revision of the team overlay (git tree hash of `.sdlc/team`), recorded on every attempt for the effect check (plan §7). */
+  overlayRev?: () => Promise<string | undefined>;
 }
 
 /** Thrown by an environment that is in use elsewhere (e.g. the preprod lease): the instance queues, no failure is counted. */
@@ -287,7 +289,15 @@ export class Engine {
         instance: d.instance,
         attempt,
         ...(resumeSessionId ? { session_id: resumeSessionId } : {}),
-        data: { reason: d.reason },
+        data: {
+          reason: d.reason,
+          agent: c.agent,
+          contract: c.id,
+          ...(d.repo ? { repo: d.repo } : {}),
+          ...(d.contract.overlay.model ? { model: d.contract.overlay.model } : {}),
+          overlay_rev: (await this.o.overlayRev?.()) ?? null,
+          rework: d.reworkInputs.map((r) => r.envelope.type),
+        },
       });
       const workdir = await this.worktrees.prepare({ instance: d.instance, story, ...(d.repo ? { repo: d.repo } : {}), attempt });
       const repoCfg = d.repo ? workflow.overlay.repos[d.repo] : undefined;

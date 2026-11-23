@@ -21,6 +21,8 @@ export interface IntakeItem {
 
 interface JiraState {
   state: LifecycleState;
+  /** The active sprint (name or id), for sprint rollups. */
+  sprint?: string;
   status: string;
   updated: string;
   splitFrom?: string;
@@ -115,7 +117,9 @@ export class JiraInbound {
         }
       }
 
-      const next: JiraState = { state: state === 'reopened' ? 'active' : state, status: issue.status, updated: issue.updated, ...(original ? { splitFrom: original } : {}) };
+      const active = issue.sprints.find((s) => s.state === 'active');
+      const sprint = active ? (active.name ?? String(active.id)) : prev?.sprint;
+      const next: JiraState = { state: state === 'reopened' ? 'active' : state, status: issue.status, updated: issue.updated, ...(sprint ? { sprint } : {}), ...(original ? { splitFrom: original } : {}) };
       const changed = prev?.state !== state;
       await this.writeState(issue.key, next);
       items.push({ key: issue.key, state, changed, issue, repoHints: hints, dependsOn: dependsOn(issue), ...(original ? { splitFrom: original } : {}) });

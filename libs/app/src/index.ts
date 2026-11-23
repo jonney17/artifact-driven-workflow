@@ -4,3 +4,4 @@ export * from './context';
 export * from './views';
 export * from './demo';
 export * from './actions';
+export * from './retro-service';

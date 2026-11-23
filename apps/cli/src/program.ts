@@ -20,6 +20,7 @@ import {
   storyView,
 } from '@sdlc/app';
 import { writeAgentFiles } from '@sdlc/hostgen';
+import { OtlpReceiver } from '@sdlc/retro';
 import { TAKEOVER_REASONS, type HandbackAt, type TakeoverReason, type TakeoverStep } from '@sdlc/orchestrator';
 
 const exec = promisify(execFile);
@@ -94,6 +95,12 @@ export function program(io: CliIO = { out: console.log, err: console.error }): C
     .action(async (o: { once?: boolean; dryRun?: boolean; interval?: number }) => {
       const c = await ctx(!!o.dryRun);
       const interval = (o.interval ?? c.workflow.overlay.runtime.poll.jira_seconds) * 1000;
+      const tel = (c.workflow.overlay as { telemetry?: { enabled?: boolean; capture_content?: boolean } }).telemetry;
+      if (tel?.enabled !== false) {
+        const rx = new OtlpReceiver(join(c.local.home, 'telemetry'), tel?.capture_content === true);
+        c.telemetry.endpoint = await rx.start();
+        io.out(`telemetry: OTLP receiver on ${c.telemetry.endpoint} → ${join(c.local.home, 'telemetry')}`);
+      }
       if (o.dryRun) io.out(`dry run: artifacts in ${c.workRoot}`);
       for (;;) {
         const r = await c.loop.once();
@@ -216,6 +223,39 @@ export function program(io: CliIO = { out: console.log, err: console.error }): C
       const c = await ctx();
       await actions.handback(c, { key, ...(repo ? { repo } : {}), step: o.step, at: o.at, user: c.local.user, ...(o.summary ? { summary: o.summary } : {}) });
       io.out(`handed back ${key}${repo ? ` ${repo}` : ''} at ${o.at}`);
+    });
+
+  p.command('metrics [key]')
+    .description('story metrics, a sprint rollup, or an overlay effect check (plan §7)')
+    .option('--sprint <id>', 'roll up the story-metrics files of a sprint (computed on read)')
+    .option('--compare-overlay <rev>', 'effect check for an overlay revision (git tree hash of .sdlc/team)')
+    .option('--agent <agent>', 'agent for --compare-overlay', 'developer')
+    .option('--primary <metric>', 'primary metric for --compare-overlay', 'rework_rounds')
+    .action(async (key: string | undefined, o: { sprint?: string; compareOverlay?: string; agent: string; primary: string }) => {
+      const c = await ctx();
+      if (o.compareOverlay) {
+        const r = await c.retro.compare(o.agent, o.compareOverlay, o.primary);
+        io.out(`${r.agent} @ ${r.rev}: ${r.verdict} (${r.reason})`);
+        io.out(`  before: n=${r.before.n} ${r.primary}=${r.before.primary.toFixed(2)} ${JSON.stringify(r.before.guardrails)}`);
+        io.out(`  after:  n=${r.after.n} ${r.primary}=${r.after.primary.toFixed(2)} ${JSON.stringify(r.after.guardrails)}`);
+        return;
+      }
+      if (key) {
+        const all = await c.retro.storyMetricsAll();
+        const m = all.find((x) => x.story === key);
+        return m ? json(m) : io.out(`${key} has no story metrics yet (written at done or cancel)`);
+      }
+      json(await c.retro.sprint(o.sprint));
+    });
+
+  p.command('improve')
+    .description('Coach (b): turn recurring retro findings into an overlay MR (one open MR per agent)')
+    .action(async () => {
+      const r = await (await ctx()).retro.improve();
+      for (const i of r.opened) io.out(`opened ${i.id}: ${i.rootCause} → ${i.fixTarget}${i.mrUrl ? ` (${i.mrUrl})` : ''}`);
+      for (const w of r.waiting) io.out(`waiting (agent has an open Coach MR or the coach lease is held): ${w}`);
+      for (const pp of r.packProposals) io.out(`pack proposal for the pack owner: ${pp}`);
+      if (!r.opened.length && !r.waiting.length && !r.packProposals.length) io.out('no recurring findings');
     });
 
   p.command('demo')

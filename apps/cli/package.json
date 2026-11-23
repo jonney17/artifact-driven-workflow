@@ -17,6 +17,7 @@
     "@sdlc/orchestrator": "workspace:*",
     "commander": "^14.0.0",
     "yaml": "^2.8.0",
-    "@sdlc/server": "workspace:*"
+    "@sdlc/server": "workspace:*",
+    "@sdlc/retro": "workspace:*"
   }
 }
