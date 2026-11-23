@@ -5,6 +5,7 @@ import { promisify } from 'node:util';
 import { Command, Option } from 'commander';
 import { stringify } from 'yaml';
 import {
+  actions,
   activity,
   artifact,
   board,
@@ -30,22 +31,10 @@ export interface CliIO {
   apis?: ContextApis;
 }
 
-/** Which role may pass which gate (plan §2 "Gates", role-checked against `members`). */
-export const GATE_ROLES: Record<string, string[]> = {
-  proposal_approval: ['dev'],
-  scenario_approval: ['qe'],
-  story_acceptance: ['po'],
-};
-
 export function program(io: CliIO = { out: console.log, err: console.error }): Command {
   const p = new Command('sdlc').description('Artifact-driven agentic SDLC engine (Phase 1, local mode)').showHelpAfterError();
   const ctx = async (dryRun = false): Promise<SdlcContext> => createContext(await loadLocalConfig(), { ...(io.apis ? { apis: io.apis } : {}), dryRun });
   const json = (v: unknown) => io.out(JSON.stringify(v, null, 2));
-  /** Persist a CLI change to the workspace repo right away (the loop does the same each pass). */
-  const push = async (c: SdlcContext, key: string, what: string) => {
-    if (!c.dryRun) await c.ws.commitAndPush(`sdlc: ${what} (${c.local.user})`, [`.sdlc/work/stories/${key}`]);
-  };
-  const role = (c: SdlcContext) => c.team.members[c.local.user] ?? [];
 
   p.command('init')
     .description('write ~/.sdlc/config.yaml for this machine')
@@ -158,20 +147,12 @@ export function program(io: CliIO = { out: console.log, err: console.error }): C
       for (const e of await activity(await ctx(), key, o.n)) io.out(`${e.ts}  ${e.type.padEnd(18)} ${e.instance ?? ''}${e.attempt ? ` #${e.attempt}` : ''}${e.data.reason ? `  ${e.data.reason}` : ''}`);
     });
 
-  const gateOf = (c: SdlcContext, type: string) => c.workflow.contracts.find((x) => x.contract.outputs.some((o) => o.type === type && o.gated) && x.contract.gate)?.contract.gate;
   p.command('approve <key> <artifactId>')
     .description('pass a gate (role-checked)')
     .action(async (key: string, id: string) => {
       const c = await ctx();
-      const a = await c.store.get(key, id);
-      if (!a) throw new Error(`${id} not found`);
-      const gate = gateOf(c, a.envelope.type);
-      if (!gate) throw new Error(`${a.envelope.type} has no gate`);
-      const need = GATE_ROLES[gate] ?? [];
-      if (need.length && !role(c).some((r) => need.includes(r))) throw new Error(`${gate} needs role ${need.join(' or ')}; you have ${role(c).join(', ') || 'none'}`);
-      await c.engine.passGate(key, id, c.local.user);
-      await push(c, key, `approve ${id}`);
-      io.out(`approved ${id} v${a.envelope.version}`);
+      const v = await actions.approve(c, key, id, c.local.user);
+      io.out(`approved ${id} v${v}`);
     });
 
   p.command('reject <key> <artifactId>')
@@ -179,8 +160,7 @@ export function program(io: CliIO = { out: console.log, err: console.error }): C
     .requiredOption('--reason <text>')
     .action(async (key: string, id: string, o: { reason: string }) => {
       const c = await ctx();
-      await c.engine.rejectGate(key, id, c.local.user, o.reason);
-      await push(c, key, `reject ${id}`);
+      await actions.reject(c, key, id, c.local.user, o.reason);
       io.out(`rejected ${id}`);
     });
 
@@ -196,10 +176,7 @@ export function program(io: CliIO = { out: console.log, err: console.error }): C
     .description('answer a question routed to you')
     .action(async (key: string, id: string, text: string[]) => {
       const c = await ctx();
-      const r = await c.questions.answer(key, id.toUpperCase(), text.join(' '), c.local.user);
-      if (r === 'rejected') throw new Error(`${id} isn't routed to ${c.local.user}`);
-      await push(c, key, `answer ${id}`);
-      io.out(`${id}: ${r}`);
+      io.out(`${id}: ${await actions.answer(c, key, id, c.local.user, text.join(' '))}`);
     });
 
   const budget = p.command('budget').description('AI credits: per story, and your own month (shown only to you)');
@@ -215,8 +192,7 @@ export function program(io: CliIO = { out: console.log, err: console.error }): C
     .description('more AI credits for one story (unblocks blocked: budget)')
     .action(async (key: string, amount: string) => {
       const c = await ctx();
-      await c.engine.raiseBudget(key, Number(amount), c.local.user);
-      await push(c, key, `budget raise ${key}`);
+      await actions.raiseBudget(c, key, Number(amount), c.local.user);
       io.out(`raised ${key} by ${amount}`);
     });
 
@@ -227,10 +203,7 @@ export function program(io: CliIO = { out: console.log, err: console.error }): C
     .requiredOption('--note <text>')
     .action(async (key: string, repo: string | undefined, o: { step: TakeoverStep; reason: TakeoverReason; note: string }) => {
       const c = await ctx();
-      const needQe = o.step === 'qe-write' || o.step === 'qe-run';
-      if (needQe && !role(c).includes('qe')) throw new Error(`${o.step} takeover needs role qe`);
-      const stopped = await c.takeovers.takeover({ story: key, ...(repo ? { repo } : {}), step: o.step, reason: o.reason, note: o.note, by: c.local.user });
-      await push(c, key, `takeover ${key} ${o.step}`);
+      const stopped = await actions.takeover(c, { key, ...(repo ? { repo } : {}), step: o.step, reason: o.reason, note: o.note, user: c.local.user });
       io.out(`taken over: ${stopped.join(', ')}`);
     });
 
@@ -241,15 +214,19 @@ export function program(io: CliIO = { out: console.log, err: console.error }): C
     .option('--summary <text>')
     .action(async (key: string, repo: string | undefined, o: { step: TakeoverStep; at: HandbackAt; summary?: string }) => {
       const c = await ctx();
-      await c.takeovers.handback({ story: key, ...(repo ? { repo } : {}), step: o.step, at: o.at, by: c.local.user, ...(o.summary ? { summary: o.summary } : {}) });
-      await push(c, key, `handback ${key} at ${o.at}`);
+      await actions.handback(c, { key, ...(repo ? { repo } : {}), step: o.step, at: o.at, user: c.local.user, ...(o.summary ? { summary: o.summary } : {}) });
       io.out(`handed back ${key}${repo ? ` ${repo}` : ''} at ${o.at}`);
     });
 
   p.command('demo')
     .description('run one story from Jira to Done on this machine with fake Jira/GitLab and scripted agents')
-    .action(async () => {
-      await runDemo(io.out);
+    .option('--serve [port]', 'then keep the Web UI running on the demo data', (v) => Number(v))
+    .action(async (o: { serve?: number | boolean }) => {
+      const d = await runDemo(io.out);
+      if (o.serve) {
+        const { startServer } = await import('./serve');
+        await startServer(d.ctx, typeof o.serve === 'number' ? o.serve : 4317, io.out);
+      }
     });
 
   p.command('serve')

@@ -9,7 +9,9 @@ await build({
   platform: 'node',
   format: 'esm',
   target: 'node22',
-  external: ['@github/copilot-sdk'],
+  // the Copilot SDK is installed only where there is a seat; the rest are optional NestJS peers we don't use
+  external: ['@github/copilot-sdk', '@nestjs/microservices', '@nestjs/microservices/*', '@nestjs/websockets', '@nestjs/websockets/*', 'class-transformer', 'class-validator', '@fastify/static', '@nestjs/platform-socket.io'],
+  tsconfig: '../../tsconfig.base.json',
   banner: { js: '#!/usr/bin/env node\nimport { createRequire as __cr } from "node:module"; const require = __cr(import.meta.url);' },
   logLevel: 'warning',
 });
