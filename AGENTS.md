@@ -8,7 +8,7 @@ Read **[docs/build/HANDOFF.md](docs/build/HANDOFF.md)** first and follow its pro
 
 ## Files
 
-- [docs/build/HANDOFF.md](docs/build/HANDOFF.md): **build status and next tasks** for the engine code (`libs/`, later `apps/` and `packs/`).
+- [docs/build/HANDOFF.md](docs/build/HANDOFF.md): **build status, what needs the work machine, known gaps and next tasks** for the engine code (`libs/`, `apps/`, `packs/`).
 - [docs/plan/phase-1-plan.md](docs/plan/phase-1-plan.md): the Phase 1 build plan (approved 2026-11-23). It was exported from the source artifact and now includes the accepted review items and the team's answers (§13).
 - [docs/workflow/WORKFLOW.md](docs/workflow/WORKFLOW.md): **the reference for any task that analyses or improves the workflow.** It covers the agents, artifacts, flow, gates, metrics, self-improvement loop, invariants and decision log.
 - [docs/plan/review-notes.md](docs/plan/review-notes.md): the review findings G1–G12 and their decisions.

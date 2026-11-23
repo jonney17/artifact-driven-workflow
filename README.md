@@ -6,19 +6,15 @@ This repo holds the design docs for a contract-driven agentic SDLC workflow on G
 - **Build status and next tasks:** [docs/build/HANDOFF.md](docs/build/HANDOFF.md).
 - **Workflow reference** (for people and AI improving the workflow): [docs/workflow/WORKFLOW.md](docs/workflow/WORKFLOW.md). AI tools start at [AGENTS.md](AGENTS.md).
 
-## Engine (in progress)
+## Engine
 
-This repo is also the `sdlc-engine` Nx monorepo from plan §9 (TypeScript, Node ≥ 22, pnpm).
-
-| Package | What it holds | Plan |
-| --- | --- | --- |
-| [libs/contracts](libs/contracts) | Zod schemas: artifact envelope, pack contracts, `team.yaml` overlay, `events.log` events, leases | §1, §2 |
-| [libs/runtimes](libs/runtimes) | `Runner` interface and the stub runner used in tests (the Copilot SDK runner comes in build step 5) | §5 |
-| [libs/orchestrator](libs/orchestrator) | Engine core: artifact store, staleness cascade, overlay resolve, make-like trigger, write-scope check, output validation, `events.log` and restart recovery, git-backed story/team leases, the engine tick | §2, §10 step 2 |
+This repo is also the `sdlc-engine` Nx monorepo from plan §9. Plan steps 2–8 are built and tested against fakes. What still needs the real Copilot, Jira and GitLab is listed in [docs/build/HANDOFF.md](docs/build/HANDOFF.md) §5.
 
 ```sh
-corepack enable        # provides pnpm (pinned in package.json)
-pnpm install
-pnpm typecheck
-pnpm test              # unit tests; the lease tests use real local git repos
+corepack enable && pnpm install
+pnpm typecheck && pnpm test
+pnpm --filter @sdlc/web build && pnpm --filter @sdlc/cli build
+node apps/cli/dist/sdlc.mjs demo --serve   # one story from Jira to Done on fakes, then the UI on http://127.0.0.1:4317
 ```
+
+Layout: `libs/` (contracts, runtimes, orchestrator, integrations, hostgen, retro, app), `apps/` (cli, server, web), `packs/safe-scrum`, `examples/overlays`, `skills/sdlc`. Details: [HANDOFF.md](docs/build/HANDOFF.md) §3.
