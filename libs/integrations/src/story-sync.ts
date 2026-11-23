@@ -6,6 +6,7 @@ import { MrSync, type ReviewFinding, pushBranch } from './gitlab/mr-sync';
 import type { JiraApi } from './jira/api';
 import { JiraOutbound, readJiraGates, type StatusKey } from './jira/outbound';
 import type { IntakeItem, JiraInbound } from './inbound';
+import { type Notifier, type Question, QuestionRouter } from '@sdlc/runtimes';
 
 export interface RepoTarget {
   /** Local clone; story branches live here (worktrees share its refs). */
@@ -30,6 +31,8 @@ export interface StorySyncOptions {
   statusRules: StatusRule[];
   /** QE (c) preprod check waits for this job on the target branch after merge (Q19: `deploy_preprod`). */
   preprodJob?: string;
+  /** `ask_human` router: Jira replies `/sdlc answer Q-n …` from the routed person answer questions (plan §6). */
+  questions?: QuestionRouter;
   /** Push story branches from the repo clone (default: real git push with the dev's own credentials). */
   push?: (repoPath: string, branch: string) => Promise<void>;
   dryRun?: boolean;
@@ -100,7 +103,14 @@ export class StorySync {
     // gates passed in Jira (role-checked)
     const issue = this.intakeCache.get(key)?.issue ?? (await this.o.jira.getIssue(key));
     if (issue) {
-      const gates = readJiraGates(issue, await this.o.jira.getComments(key), this.o.jiraCfg, this.o.members);
+      const comments = await this.o.jira.getComments(key);
+      if (this.o.questions) {
+        for (const c of comments) {
+          const cmd = QuestionRouter.parseAnswerCommand(c.body);
+          if (cmd && c.author?.email) await this.o.questions.answer(key, cmd.id, cmd.text, c.author.email);
+        }
+      }
+      const gates = readJiraGates(issue, comments, this.o.jiraCfg, this.o.members);
       for (const a of artifacts) {
         if (a.envelope.status !== 'ready') continue;
         if (gates.story_acceptance && a.envelope.type === 'story-acceptance') await engine.passGate(key, a.envelope.id, 'jira:accepted');
@@ -222,12 +232,6 @@ export class StorySync {
     for (const s of state.instances.values()) {
       if (s.state === 'blocked') await outbound.comment(key, `blocked:${s.instance}:a${s.lastAttempt}`, `${s.instance} is blocked and needs a human (see the Board).`);
     }
-    if (this.o.jiraCfg.post_questions_as_comments) {
-      for (const e of (await this.o.events.read(key)).filter((x) => x.type === 'attempt.waiting')) {
-        const q = e.data.question as { route: string; text: string } | undefined;
-        if (q) await outbound.comment(key, `question:${e.id}`, `Question for the ${q.route} owner from ${e.instance}:\n\n${q.text}\n\nReply with: /sdlc answer ${e.instance} <your answer>`);
-      }
-    }
 
     // Jira status
     const status = storyStatus(artifacts, story.repos, this.o.statusRules);
@@ -236,3 +240,30 @@ export class StorySync {
 }
 
 export type { Artifact };
+
+/**
+ * Posts each question as a Jira comment for the routed people (plan §6: in local mode, people other
+ * than the story owner answer by replying in Jira). Idempotent per question id.
+ */
+export class JiraQuestionNotifier implements Notifier {
+  constructor(private readonly outbound: JiraOutbound) {}
+
+  async notify(q: Question): Promise<void> {
+    const who = q.people.length ? q.people.join(', ') : `the ${q.role}`;
+    const text =
+      q.status === 'assumed'
+        ? `${q.id} (${q.instance}): proceeding with an assumption, to be checked by the Reviewer and QE.
+
+Question: ${q.text}
+Assumption: ${q.answer}`
+        : `${q.id} for ${who} (${q.instance}):
+
+${q.text}${q.options?.length ? `
+
+Options: ${q.options.join(' | ')}` : ''}${q.recommended ? `
+Recommended: ${q.recommended}` : ''}
+
+Reply with: /sdlc answer ${q.id} <your answer>`;
+    await this.outbound.comment(q.story, `question:${q.id}`, text);
+  }
+}

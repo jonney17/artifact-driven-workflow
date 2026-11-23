@@ -25,6 +25,8 @@ export const EngineEventSchema = z.object({
     'instance.unblocked',
     'gate.passed',
     'gate.rejected',
+    'budget.raised',
+    'budget.warning',
     'takeover.started',
     'takeover.ended',
   ]),

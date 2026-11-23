@@ -194,6 +194,18 @@ importers:
         specifier: ^4.0.0
         version: 4.6.7
 
+  libs/hostgen:
+    dependencies:
+      '@sdlc/contracts':
+        specifier: workspace:*
+        version: link:../contracts
+      '@sdlc/orchestrator':
+        specifier: workspace:*
+        version: link:../orchestrator
+      yaml:
+        specifier: ^2.8.0
+        version: 2.9.1
+
   libs/integrations:
     dependencies:
       '@sdlc/contracts':
@@ -202,6 +214,9 @@ importers:
       '@sdlc/orchestrator':
         specifier: workspace:*
         version: link:../orchestrator
+      '@sdlc/runtimes':
+        specifier: workspace:*
+        version: link:../runtimes
       turndown:
         specifier: ^7.2.0
         version: 7.2.5
@@ -240,6 +255,16 @@ importers:
       '@sdlc/contracts':
         specifier: workspace:*
         version: link:../contracts
+      picomatch:
+        specifier: ^4.0.0
+        version: 4.0.7
+      yaml:
+        specifier: ^2.8.0
+        version: 2.9.1
+    devDependencies:
+      '@types/picomatch':
+        specifier: ^4.0.0
+        version: 4.0.3
 
   packs/safe-scrum:
     devDependencies:

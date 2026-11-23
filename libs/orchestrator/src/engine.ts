@@ -8,6 +8,7 @@ import { collectInputs, type Decision, evaluate, isReworkFor } from './trigger';
 import { checkWriteScope, parseSensitiveChanges } from './writescope';
 import { planOutputs } from './outputs';
 import { Semaphore } from './semaphore';
+import type { BudgetGuard } from './budget';
 
 /** Provides a fresh git worktree per attempt (plan §2). */
 export interface WorktreeProvider {
@@ -26,12 +27,14 @@ export interface EngineOptions {
   slots?: Semaphore;
   /** Environments the engine starts around attempts of contracts that name one (plan §4a). */
   environments?: Record<string, Environment>;
+  /** AI-credit limits (plan §5a). Without it, nothing is enforced. */
+  budget?: BudgetGuard;
 }
 
 /** Something the engine starts before an attempt and stops after it, e.g. the local stack for QE (c). */
 export interface Environment {
-  /** Starts (or joins) the environment; resolves to a release function. Throws if it can't start. */
-  acquire(ctx: { story: string; instance: string; repos: string[] }): Promise<() => Promise<void>>;
+  /** Starts (or joins) the environment; resolves to its release function and base URL. Throws if it can't start. */
+  acquire(ctx: { story: string; instance: string; repos: string[] }): Promise<{ release: () => Promise<void>; baseUrl?: string }>;
 }
 
 export interface StoryInput {
@@ -42,8 +45,32 @@ export interface StoryInput {
 }
 
 export interface TickReport {
+  /** Set when no new session started because of the story budget or the personal reserve. */
+  budgetStop?: string;
   decisions: Decision[];
   dispatched: { instance: string; attempt: number; result: AttemptResult['status'] | 'rejected'; resumed: boolean }[];
+}
+
+/** Sensitive paths the approved proposal among the inputs unlocks (plan §5b). */
+function unlockedPaths(inputs: Artifact[]): string[] {
+  const proposal = inputs.find((a) => a.envelope.type === 'proposal' && a.envelope.status === 'approved');
+  return proposal ? parseSensitiveChanges(proposal.body) : [];
+}
+
+/** Maps `shell:<name>` tools to the repo's configured commands (`repos.<repo>.build` …). */
+function shellCommands(tools: string[], repo: Record<string, unknown> | undefined): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const t of tools) {
+    const name = t.startsWith('shell:') ? t.slice(6) : undefined;
+    const cmd = name && repo?.[name];
+    if (name && typeof cmd === 'string') out[name] = cmd;
+  }
+  return out;
+}
+
+/** Changes whenever the story's budget is raised, so a new block/warning can be recorded after a raise. */
+function storyLimitKey(events: { type: string }[]): number {
+  return events.filter((e) => e.type === 'budget.raised').length;
 }
 
 /** Id of the answer artifact for an instance's waiting attempt. */
@@ -110,9 +137,26 @@ export class Engine {
       }
     }
 
+    // Budget (plan §5a): limits apply when a new session starts; running sessions are never cut off.
+    let budgetStop: string | undefined;
+    if (this.o.budget && story.owned && (resumable.length || decisions.some((d) => d.action === 'run'))) {
+      const allEvents = await events.read(story.key);
+      const check = await this.o.budget.check(allEvents);
+      if (!check.ok) {
+        budgetStop = check.reason;
+        const id = `budget:${story.key}:${check.reason}:${storyLimitKey(allEvents)}`;
+        if (check.reason === 'story budget' && !state.seen.has(id)) {
+          await events.append({ id, story: story.key, type: 'instance.blocked', data: { reason: 'blocked: budget', budget: true } });
+        }
+      } else if (check.warn) {
+        const id = `budget-warn:${story.key}:${check.warn}:${storyLimitKey(allEvents)}`;
+        if (!state.seen.has(id)) await events.append({ id, story: story.key, type: 'budget.warning', data: { kind: check.warn } });
+      }
+    }
+
     // Resumes first: a human answered, so that branch continues in the same session (plan §6).
     const jobs: (() => Promise<TickReport['dispatched'][number]>)[] = [];
-    if (story.owned) {
+    if (story.owned && !budgetStop) {
       for (const r of resumable) {
         const rc = workflow.contracts.find((c) => r.instance.startsWith(`${c.contract.id}:`));
         if (!rc) continue;
@@ -132,7 +176,7 @@ export class Engine {
       }
     }
     for (const d of decisions) {
-      if (d.action !== 'run') continue;
+      if (d.action !== 'run' || budgetStop) continue;
       const s = state.instances.get(d.instance);
       // An attempt that was dispatched but never finished (crash) keeps its number; anything else is a new attempt.
       const attempt = s?.state === 'running' ? s.lastAttempt : (s?.lastAttempt ?? 0) + 1;
@@ -140,7 +184,7 @@ export class Engine {
     }
 
     const dispatched = await Promise.all(jobs.map((j) => this.slots.run(j)));
-    return { decisions, dispatched };
+    return { decisions, dispatched, ...(budgetStop ? { budgetStop } : {}) };
   }
 
   /** Records a human answer to a waiting attempt; the next tick resumes that session. */
@@ -159,6 +203,12 @@ export class Engine {
   }
 
   /** Inputs for a resumed session: the instance's current inputs plus its open rework. */
+  /** `sdlc budget raise <KEY> <n>` (plan §5a): more AI credits for one story; unblocks a `blocked: budget` story. */
+  async raiseBudget(story: string, amount: number, by: string): Promise<void> {
+    if (!(amount > 0)) throw new Error('amount must be positive');
+    await this.o.events.append({ story, type: 'budget.raised', data: { amount, by } });
+  }
+
   /**
    * A human passes a gate on an artifact (plan §2 "Gates"): role-checked by the caller (CLI, Web UI or
    * Jira sync) against `members`. The artifact must be waiting for it (status `ready`).
@@ -222,11 +272,14 @@ export class Engine {
       const workdir = await this.worktrees.prepare({ instance: d.instance, story, ...(d.repo ? { repo: d.repo } : {}), attempt });
       const repoCfg = d.repo ? workflow.overlay.repos[d.repo] : undefined;
       let release: (() => Promise<void>) | undefined;
+      let environmentUrl: string | undefined;
       if (c.environment) {
         const env = this.o.environments?.[c.environment];
         try {
           if (!env) throw new Error(`environment ${c.environment} is not configured`);
-          release = await env.acquire({ story, instance: d.instance, repos: [...new Set(d.inputs.flatMap((a) => (a.envelope.repo ? [a.envelope.repo] : [])))] });
+          const acquired = await env.acquire({ story, instance: d.instance, repos: [...new Set(d.inputs.flatMap((a) => (a.envelope.repo ? [a.envelope.repo] : [])))] });
+          release = acquired.release;
+          environmentUrl = acquired.baseUrl;
         } catch (e) {
           await events.append({ story, instance: d.instance, attempt, type: 'attempt.failed', data: { reason: `environment ${c.environment}: ${(e as Error).message}`, environment: true } });
           await this.escalateIfNeeded(story, d.instance, state, 'environment failed');
@@ -250,11 +303,18 @@ export class Engine {
           maxTurns: d.contract.maxTurns,
           writeAllow: c.write_allow,
           writeDeny: c.write_deny,
+          sensitivePaths: workflow.overlay.security.sensitive_paths,
+          unlocked: unlockedPaths(d.inputs),
+          vars: { test_dirs: repoCfg?.test_dirs ?? [] },
+          shellCommands: shellCommands(c.tools, repoCfg),
+          networkAllow: workflow.overlay.security.network.allow,
+          ...(environmentUrl ? { environmentUrl } : {}),
         },
         ...(resumeSessionId ? { resumeSessionId } : {}),
         })
         .finally(() => release?.());
       const base = { story, instance: d.instance, attempt, session_id: result.sessionId };
+      if (result.status === 'done' && result.aiCredits) await this.o.budget?.record(result.aiCredits);
 
       if (result.status === 'waiting') {
         await events.append({ ...base, type: 'attempt.waiting', data: { question: result.question } });
@@ -281,13 +341,12 @@ export class Engine {
         return { instance: d.instance, attempt, result: 'rejected', resumed };
       }
 
-      const proposal = d.inputs.find((a) => a.envelope.type === 'proposal' && a.envelope.status === 'approved');
       const violations = checkWriteScope({
         changedFiles: result.changedFiles,
         writeAllow: c.write_allow,
         writeDeny: c.write_deny,
         sensitivePaths: workflow.overlay.security.sensitive_paths,
-        unlocked: proposal ? parseSensitiveChanges(proposal.body) : [],
+        unlocked: unlockedPaths(d.inputs),
         vars: { test_dirs: repoCfg?.test_dirs ?? [] },
       });
       if (violations.length) {

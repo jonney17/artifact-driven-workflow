@@ -18,6 +18,17 @@ export interface AttemptRequest {
     maxTurns: number;
     writeAllow: string[];
     writeDeny: string[];
+    /** `security.sensitive_paths`, and the ones the approved proposal unlocks (plan §5b). */
+    sensitivePaths?: string[];
+    unlocked?: string[];
+    /** Values for `${name}` placeholders in write patterns, e.g. test_dirs. */
+    vars?: Record<string, string[]>;
+    /** `shell:<name>` tool → the command from `repos.<repo>.<name>` (e.g. build → "mvn -q verify"). */
+    shellCommands?: Record<string, string>;
+    /** Hosts agents may reach (`security.network.allow`). */
+    networkAllow?: string[];
+    /** Base URL of the environment the engine started (QE (c) local stack, preprod). */
+    environmentUrl?: string;
   };
   /** Set only when resuming an `ask_human` wait; every other attempt starts a new session. */
   resumeSessionId?: string;

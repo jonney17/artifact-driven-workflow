@@ -9,6 +9,7 @@
   "dependencies": {
     "@sdlc/contracts": "workspace:*",
     "@sdlc/orchestrator": "workspace:*",
+    "@sdlc/runtimes": "workspace:*",
     "turndown": "^7.2.0",
     "zod": "^4.0.0"
   },

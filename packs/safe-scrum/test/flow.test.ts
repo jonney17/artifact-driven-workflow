@@ -89,7 +89,7 @@ describe('pack safe-scrum', () => {
     const envOf = (name: string) => ({
       acquire: async () => {
         env.push(`${name} up`);
-        return async () => void env.push(`${name} down`);
+        return { release: async () => void env.push(`${name} down`), baseUrl: 'http://localhost:8080' };
       },
     });
     const engine = new Engine({ store, events, runner, workflow, environments: { local_stack: envOf('local_stack'), preprod: envOf('preprod') } });
