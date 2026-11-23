@@ -1,0 +1,16 @@
+{
+  "name": "@sdlc/integrations",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "scripts": { "test": "vitest run", "typecheck": "tsc -p tsconfig.json" },
+  "dependencies": {
+    "@sdlc/contracts": "workspace:*",
+    "@sdlc/orchestrator": "workspace:*",
+    "turndown": "^7.2.0",
+    "zod": "^4.0.0"
+  },
+  "devDependencies": { "@types/turndown": "^5.0.5" }
+}
