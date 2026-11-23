@@ -7,6 +7,7 @@ import { type ArtifactStore, pin } from './store';
 import { collectInputs, type Decision, evaluate, isReworkFor } from './trigger';
 import { checkWriteScope, parseSensitiveChanges } from './writescope';
 import { validateOutput } from './validate';
+import { Semaphore } from './semaphore';
 
 /** Provides a fresh git worktree per attempt (plan §2). */
 export interface WorktreeProvider {
@@ -21,6 +22,8 @@ export interface EngineOptions {
   worktrees?: WorktreeProvider;
   /** Failed attempts in a row before an instance is blocked and escalated. */
   maxFailures?: number;
+  /** Shared session slots for the whole machine; defaults to `limits.concurrency`. */
+  slots?: Semaphore;
 }
 
 export interface StoryInput {
@@ -49,8 +52,10 @@ export class Engine {
   private readonly running = new Set<string>();
   private readonly worktrees: WorktreeProvider;
   private readonly maxFailures: number;
+  private readonly slots: Semaphore;
 
   constructor(private readonly o: EngineOptions) {
+    this.slots = o.slots ?? new Semaphore(o.workflow.limits.concurrency);
     this.worktrees = o.worktrees ?? {
       prepare: async ({ instance, attempt }) => `worktrees/${instance.replace(/:/g, '_')}/a${attempt}`,
     };
@@ -126,11 +131,7 @@ export class Engine {
       jobs.push(() => this.dispatch(story.key, d, attempt, state));
     }
 
-    const dispatched: TickReport['dispatched'] = [];
-    const limit = Math.max(1, workflow.limits.concurrency - this.running.size);
-    for (let i = 0; i < jobs.length; i += limit) {
-      dispatched.push(...(await Promise.all(jobs.slice(i, i + limit).map((j) => j()))));
-    }
+    const dispatched = await Promise.all(jobs.map((j) => this.slots.run(j)));
     return { decisions, dispatched };
   }
 

@@ -9,3 +9,6 @@ export * from './recovery';
 export * from './git';
 export * from './lease';
 export * from './engine';
+export * from './semaphore';
+export * from './worktree';
+export * from './loop';

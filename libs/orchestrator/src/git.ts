@@ -29,7 +29,8 @@ export class GitWorkspace {
 
   /** Commits the given paths (adds, edits and deletions) and pushes. Returns 'conflict' if another engine changed the same files. */
   async commitAndPush(message: string, paths: string[]): Promise<PushOutcome> {
-    await this.git('add', '--all', '--', ...paths);
+    // a path that is neither on disk nor tracked (e.g. a story with no retro yet) is skipped
+    for (const p of paths) await this.git('add', '--all', '--', p).catch(() => undefined);
     const staged = await this.git('diff', '--cached', '--name-only');
     if (staged) await this.git('commit', '--quiet', '-m', message);
     for (let i = 0; i <= this.maxPushRetries; i++) {
