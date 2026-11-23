@@ -182,6 +182,7 @@ describe('pack safe-scrum', () => {
     await jira.transition('PAY-1', (await jira.getTransitions('PAY-1')).find((t) => t.to === 'Accepted')!.id);
     expect(await cycle()).toEqual([]);
     expect(await art('story-acceptance-PAY-1')).toBe('approved');
+    expect(status()).toBe('Accepted'); // the engine never undoes the PO's move
     gl.approve('pay/api', 1, 'eve');
     gl.approve('pay/api', 1, 'dan');
     gl.approve('pay/api', 1, 'chi');

@@ -6,7 +6,7 @@ export const EVENT_PROPERTY = 'sdlc.event';
 
 export type StatusKey = keyof JiraConfig['status_map'];
 
-export type TransitionOutcome = 'transitioned' | 'already there' | 'not mapped' | 'no such transition';
+export type TransitionOutcome = 'transitioned' | 'already there' | 'not mapped' | 'no such transition' | 'protected';
 
 /**
  * The engine's only writes to Jira (plan §3 "Outbound"), each idempotent:
@@ -21,11 +21,17 @@ export class JiraOutbound {
     private readonly opts: { jiraDevPanel: boolean; dryRun?: boolean } = { jiraDevPanel: false },
   ) {}
 
+  /**
+   * Moves the story to the mapped status. Never moves it out of a status a human set to pass a gate
+   * (e.g. "Accepted"), except on to `done`: the engine must not undo a human's move.
+   */
   async transitionTo(key: string, status: StatusKey): Promise<TransitionOutcome> {
     const target = this.cfg.status_map[status];
     if (!target) return 'not mapped';
     const issue = await this.jira.getIssue(key);
     if (issue?.status === target) return 'already there';
+    const humanStatuses = [this.cfg.gates_from_jira.story_acceptance?.transition].filter(Boolean);
+    if (issue && humanStatuses.includes(issue.status) && status !== 'done') return 'protected';
     const t = (await this.jira.getTransitions(key)).find((x) => x.to === target || x.name === target);
     if (!t) return 'no such transition';
     if (!this.opts.dryRun) await this.jira.transition(key, t.id);

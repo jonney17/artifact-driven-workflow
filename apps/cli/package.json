@@ -1,0 +1,19 @@
+{
+  "name": "@sdlc/cli",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "bin": { "sdlc": "dist/sdlc.mjs" },
+  "scripts": {
+    "build": "node build.mjs",
+    "test": "vitest run",
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@sdlc/app": "workspace:*",
+    "@sdlc/hostgen": "workspace:*",
+    "@sdlc/orchestrator": "workspace:*",
+    "commander": "^14.0.0",
+    "yaml": "^2.8.0"
+  }
+}

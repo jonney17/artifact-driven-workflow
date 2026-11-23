@@ -1,0 +1,29 @@
+# A second, throwaway team on the same pack (plan §10 step 8: prove reuse).
+# Different Jira project and statuses, one Node repo, auto scenario gate, smaller budget, no preprod.
+pack: safe-scrum@1
+team: growth-web
+jira:
+  site: https://growth.atlassian.net
+  project: GRW
+  intake_jql: "project = GRW AND sprint in openSprints() AND issuetype in (Story, Task)"
+  fields: {acceptance_criteria: "Definition of Done", topic: "Parent", repos: "labels:svc-*"}
+  status_map: {in_progress: "Doing", in_review: "Review", done: "Shipped"}
+  defects: {mode: comment}
+repos:
+  storefront: {path: ../storefront, gitlab_project: growth/storefront, branch: develop, build: "pnpm build", unit: "pnpm test", e2e: "pnpm e2e", test_dirs: [e2e]}
+gitlab:
+  url: https://gitlab.growth.example
+  token_ref: GROWTH_GITLAB_TOKEN
+  mr: {labels: [ai, growth], jira_dev_panel: true}
+gates: {proposal_approval: human, scenario_approval: auto, story_acceptance: human}
+limits: {review_rounds: 1, defect_rounds: 2, concurrency: 1, ai_credits_per_story: 1500}
+security:
+  sensitive_paths: ["**/package.json", "**/pnpm-lock.yaml", ".gitlab-ci.yml"]
+  network: {mode: allowlist, allow: ["*.githubcopilot.com", "registry.npmjs.org", "localhost"]}
+members: {"pat@growth": [po], "sam@growth": [dev], "kim@growth": [dev, qe], "lee@growth": [sm]}
+questions: {routes: {requirement: po, technical: responsible_dev, test: qe, environment: sm}, live_wait_minutes: 5}
+agents:
+  developer: {model: "<cheaper model id>"}
+  reviewer: {enabled: true}
+qe:
+  local_env: {up: "pnpm stack:up", down: "pnpm stack:down", base_url: "http://localhost:3000"}

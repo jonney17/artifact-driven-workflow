@@ -65,7 +65,7 @@ export function planOutputs(args: {
         continue;
       }
       const repo = o.scope === 'repo' ? d.repo : undefined;
-      const w = planOne(o, { story, repo, body: d.body, gateMode: contract.gate ? args.gateMode : null, existing, planned: writes });
+      const w = planOne(o, { story, repo, body: d.body, gateMode: contract.gate && o.gated ? args.gateMode : null, existing, planned: writes });
       if ('message' in w) issues.push(w);
       else writes.push(w);
     }

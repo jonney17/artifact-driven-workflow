@@ -1,0 +1,2 @@
+- Flag any `double`/`float` used for money as a **blocker**.
+- Check that every new endpoint has an acceptance test hook listed in the proposal.

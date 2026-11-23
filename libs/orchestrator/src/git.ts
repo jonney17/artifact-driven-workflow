@@ -24,7 +24,7 @@ export class GitWorkspace {
   }
 
   async pull(): Promise<void> {
-    await this.git('pull', '--rebase', '--quiet', this.remote, this.branch);
+    await this.git('pull', '--rebase', '--autostash', '--quiet', this.remote, this.branch);
   }
 
   /** Commits the given paths (adds, edits and deletions) and pushes. Returns 'conflict' if another engine changed the same files. */
@@ -39,7 +39,7 @@ export class GitWorkspace {
         return 'ok';
       } catch {
         try {
-          await this.git('pull', '--rebase', '--quiet', this.remote, this.branch);
+          await this.git('pull', '--rebase', '--autostash', '--quiet', this.remote, this.branch);
         } catch {
           await this.git('rebase', '--abort').catch(() => undefined);
           await this.git('reset', '--hard', '--quiet', `${this.remote}/${this.branch}`);

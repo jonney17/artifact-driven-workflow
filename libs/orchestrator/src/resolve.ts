@@ -51,7 +51,7 @@ export function resolveWorkflow(pack: Pack, rawOverlay: unknown): ResolvedWorkfl
   const expected = `${pack.name}@${pack.major}`;
   if (overlay.pack !== expected) throw new OverlayError(`team.yaml uses pack ${overlay.pack}, but the loaded pack is ${expected}`);
 
-  const agents = new Set(pack.contracts.map((c) => c.agent));
+  const agents = new Set([...pack.contracts.map((c) => c.agent), ...Object.keys(pack.agents ?? {})]);
   for (const name of Object.keys(overlay.agents)) {
     if (!agents.has(name)) throw new OverlayError(`agents.${name}: no such agent in pack ${expected}`);
   }

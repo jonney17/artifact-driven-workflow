@@ -1,5 +1,7 @@
 import { type ArtifactStore, type Engine, type EventLog, parseSensitiveChanges, replay, type StatusRule, storyRepos, storyStatus, type TickReport } from '@sdlc/orchestrator';
 import type { Artifact } from '@sdlc/contracts';
+import { readFile, writeFile } from 'node:fs/promises';
+import { join } from 'node:path';
 import type { JiraConfig, LifecycleConfig, Members } from './config';
 import type { GitLabApi, MergeRequest } from './gitlab/api';
 import { MrSync, type ReviewFinding, pushBranch } from './gitlab/mr-sync';
@@ -235,7 +237,13 @@ export class StorySync {
 
     // Jira status
     const status = storyStatus(artifacts, story.repos, this.o.statusRules);
-    if (status) await outbound.transitionTo(key, status as StatusKey);
+    // only when the engine's own derived status moves, so a human's change in Jira isn't fought every pass
+    const statePath = join(store.storyDir(key), 'sync.json');
+    const last = await readFile(statePath, 'utf8').then((t) => JSON.parse(t).status as string | undefined, () => undefined);
+    if (status && status !== last) {
+      const outcome = await outbound.transitionTo(key, status as StatusKey);
+      if (outcome !== 'no such transition' && !this.o.dryRun) await writeFile(statePath, `${JSON.stringify({ status, outcome }, null, 2)}\n`, 'utf8');
+    }
   }
 }
 

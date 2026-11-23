@@ -8,7 +8,7 @@ inputs:
 rework_inputs:
   - {type: proposal-feedback, scope: story}
 outputs:
-  - {type: explore, required_sections: [Affected repos, Reuse, Risks]}
+  - {type: explore, gated: false, required_sections: [Affected repos, Reuse, Risks]}
   - type: proposal
     scope: repo
     multiple: true

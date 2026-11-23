@@ -31,6 +31,9 @@ export interface EngineOptions {
   budget?: BudgetGuard;
 }
 
+/** Thrown by an environment that is in use elsewhere (e.g. the preprod lease): the instance queues, no failure is counted. */
+export class EnvironmentBusyError extends Error {}
+
 /** Something the engine starts before an attempt and stops after it, e.g. the local stack for QE (c). */
 export interface Environment {
   /** Starts (or joins) the environment; resolves to its release function and base URL. Throws if it can't start. */
@@ -48,7 +51,7 @@ export interface TickReport {
   /** Set when no new session started because of the story budget or the personal reserve. */
   budgetStop?: string;
   decisions: Decision[];
-  dispatched: { instance: string; attempt: number; result: AttemptResult['status'] | 'rejected'; resumed: boolean }[];
+  dispatched: { instance: string; attempt: number; result: AttemptResult['status'] | 'rejected' | 'busy'; resumed: boolean }[];
 }
 
 /** Sensitive paths the approved proposal among the inputs unlocks (plan §5b). */
@@ -259,8 +262,25 @@ export class Engine {
     const { store, events, runner, workflow } = this.o;
     const c = d.contract.contract;
     this.running.add(d.instance);
+    const resumed = resumeSessionId !== undefined;
+    let release: (() => Promise<void>) | undefined;
+    let environmentUrl: string | undefined;
     try {
-      const resumed = resumeSessionId !== undefined;
+      // The environment comes first: if it is busy (e.g. the preprod lease), nothing is recorded and the instance just queues.
+      if (c.environment) {
+        const env = this.o.environments?.[c.environment];
+        try {
+          if (!env) throw new Error(`environment ${c.environment} is not configured`);
+          const acquired = await env.acquire({ story, instance: d.instance, repos: [...new Set(d.inputs.flatMap((a) => (a.envelope.repo ? [a.envelope.repo] : [])))] });
+          release = acquired.release;
+          environmentUrl = acquired.baseUrl;
+        } catch (e) {
+          if (e instanceof EnvironmentBusyError) return { instance: d.instance, attempt, result: 'busy', resumed };
+          await events.append({ story, instance: d.instance, attempt, type: 'attempt.failed', data: { reason: `environment ${c.environment}: ${(e as Error).message}`, environment: true } });
+          await this.escalateIfNeeded(story, d.instance, state, 'environment failed');
+          return { instance: d.instance, attempt, result: 'failed', resumed };
+        }
+      }
       await events.append({
         story,
         type: resumed ? 'attempt.resumed' : 'attempt.dispatched',
@@ -271,21 +291,6 @@ export class Engine {
       });
       const workdir = await this.worktrees.prepare({ instance: d.instance, story, ...(d.repo ? { repo: d.repo } : {}), attempt });
       const repoCfg = d.repo ? workflow.overlay.repos[d.repo] : undefined;
-      let release: (() => Promise<void>) | undefined;
-      let environmentUrl: string | undefined;
-      if (c.environment) {
-        const env = this.o.environments?.[c.environment];
-        try {
-          if (!env) throw new Error(`environment ${c.environment} is not configured`);
-          const acquired = await env.acquire({ story, instance: d.instance, repos: [...new Set(d.inputs.flatMap((a) => (a.envelope.repo ? [a.envelope.repo] : [])))] });
-          release = acquired.release;
-          environmentUrl = acquired.baseUrl;
-        } catch (e) {
-          await events.append({ story, instance: d.instance, attempt, type: 'attempt.failed', data: { reason: `environment ${c.environment}: ${(e as Error).message}`, environment: true } });
-          await this.escalateIfNeeded(story, d.instance, state, 'environment failed');
-          return { instance: d.instance, attempt, result: 'failed', resumed };
-        }
-      }
       const result = await runner
         .run({
         instance: d.instance,
@@ -312,7 +317,11 @@ export class Engine {
         },
         ...(resumeSessionId ? { resumeSessionId } : {}),
         })
-        .finally(() => release?.());
+        .finally(() => {
+          const r = release;
+          release = undefined;
+          return r?.();
+        });
       const base = { story, instance: d.instance, attempt, session_id: result.sessionId };
       if (result.status === 'done' && result.aiCredits) await this.o.budget?.record(result.aiCredits);
 
@@ -388,6 +397,7 @@ export class Engine {
       await events.append({ ...base, type: 'attempt.finished', data: { ai_credits: result.aiCredits ?? null, changed_files: result.changedFiles.length, consumed: d.reworkInputs.map((r) => r.envelope.id) } });
       return { instance: d.instance, attempt, result: 'done', resumed };
     } finally {
+      await release?.().catch(() => undefined);
       this.running.delete(d.instance);
     }
   }

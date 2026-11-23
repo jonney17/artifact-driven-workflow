@@ -1,0 +1,134 @@
+# .sdlc/team/team.yaml
+pack: safe-scrum@1
+team: payments-squad
+jira:
+  site: https://corp.atlassian.net
+  project: PAY
+  intake_jql: "project = PAY AND sprint in openSprints() AND issuetype = Story"   # active sprint = committed
+  fields:
+    acceptance_criteria: "Acceptance Criteria"  # Jira field name (Q6); `sdlc doctor` resolves its field id
+    topic: "Epic Link"                         # Story → Epic (the Topic) via the Epic Link field (Q7)
+    repos: labels:repo-*                       # optional hint; Planner confirms
+  status_map:                                  # workflow event → Jira transition; configurable. TODO (Q6): the team fills in its real statuses later; until then these placeholders are used
+    refining: "In Refinement"
+    in_progress: "In Progress"
+    in_review: "In Review"
+    in_qa: "In QA"
+    ready_for_acceptance: "Ready for Acceptance"
+    done: "Done"
+  gates_from_jira:                             # gates a human can also pass in Jira
+    story_acceptance: {transition: "Accepted"}
+    scenario_approval: {comment_command: "/sdlc approve scenarios", role: qe}   # QE's part of proposal_approval
+  defects: {mode: subtask, issuetype: "Sub-bug"}   # subtask | linked_bug | comment
+  post_questions_as_comments: true
+confluence: {site: https://corp.atlassian.net/wiki, prd_link: {from: epic, issue_link: "mentioned in"}}   # the Epic's Confluence issue link (Q7); the PRD page has no required format
+ids: {story: "PAY-\\d+", ac: "{story}-AC\\d+", requirement: "FR\\d+"}
+repos:
+  billing-api: {path: ../billing-api, gitlab_project: payments/billing-api, branch: main, build: "mvn -q verify", unit: "mvn test",
+                acceptance: "mvn -Pacceptance verify", test_dirs: [src/acceptance]}
+  web-app:     {path: ../web-app, gitlab_project: payments/web-app, branch: main, build: "pnpm build", unit: "pnpm test", e2e: "pnpm e2e", test_dirs: [e2e]}
+gitlab:
+  url: https://gitlab.corp
+  token_ref: GITLAB_TOKEN                # Phase 1: the dev's own token in the OS keychain; never in the overlay
+  mr:
+    draft_until: qe_pass
+    labels: [sdlc]
+    reviewer_starts_on: pipeline_success
+    jira_dev_panel: false                # GitLab's Jira integration exists but is disabled for now (Q3): the engine posts MR links; set true when it is enabled
+paths: {change_folder: "{repo}/.team/changes/{story}"}   # merged to main with the code
+lifecycle:
+  in_flight_after: planner              # a story counts as in flight once the Planner produced a change folder
+  carry_over: keep_in_flight            # keep in-flight stories running when moved to a future sprint
+  split: {link_field: "Linked Issues", link_type: "split from", also_comment: true, reference_inputs: true}   # link type name to confirm (Q9); a "split from" comment also counts
+  cancel: {statuses: ["Cancelled"], resolutions: ["Won't Do"], mrs: close, branches: keep}
+  reopened: defect
+  retention: {paused_days: 14}
+takeover:
+  reasons: [stuck, wrong-approach, delicate-change, faster-by-hand, other]
+  retro: true                           # a takeover is a Coach signal
+security:
+  isolation: process                    # process (Phase 1) | container (later)
+  untrusted_fencing: true
+  network:
+    mode: allowlist                     # enforced via a local proxy per session in Phase 1 (best-effort)
+    allow:                              # SAMPLE (Q12): replace with your real hosts before the real run
+      # Copilot: agent model calls and sign-in (confirm exact endpoints in the Copilot SDK spike)
+      - api.githubcopilot.com
+      - "*.githubcopilot.com"
+      - api.github.com
+      - github.com
+      # Code hosting: git fetches only; pushes are done by the engine, not agents
+      - gitlab.<your-org>.com
+      # Package registries: prefer the internal mirror and drop the public ones
+      - nexus.<your-org>.com            # Maven/npm mirror (e.g. Nexus or Artifactory)
+      - repo.maven.apache.org
+      - registry.npmjs.org
+      # Test environment for QE (c)
+      - localhost                       # the local stack for QE (c)
+      - preprod.<your-org>.com          # preprod check after merge
+    # Not allowed for agents on purpose: Jira, Confluence, Teams and any other host (only the engine talks to them)
+  sensitive_paths:                      # write-denied unless the approved proposal lists them
+    - .gitlab-ci.yml
+    - .gitlab/**
+    - "**/pom.xml"
+    - .mvn/**
+    - "**/package.json"
+    - "**/pnpm-lock.yaml"
+    - .npmrc
+    - "**/Dockerfile*"
+    - "**/*.sh"
+    - .sdlc/**
+    - .github/agents/**
+  engine_os_user: null                  # optional hardening: run the engine as a separate local user
+runtime:
+  mode: local                          # local (Phase 1, one engine per dev) | team_host (later)
+  owner: assignee                      # assignee | all
+  workspace_repo: payments/payments-sdlc-workspace
+  lease_ttl_minutes: 30
+  poll: {jira_seconds: 120, gitlab_seconds: 60}   # local mode has no webhooks
+members: {alice@corp: [po], bob@corp: [dev], eve@corp: [dev], chi@corp: [qe], dan@corp: [sm]}
+responsible_dev:                       # who approves proposals, answers technical questions, merges
+  from: jira_assignee                  # the Story's assignee (or the per-repo sub-task assignee if the team uses them)
+  per_repo_override: {}                # e.g. {billing-api: bob@corp}
+  fallback: none                       # unassigned stories are not started (engine per assignee, §2)
+improvement_reviewers: [dev]           # who reviews/merges Coach overlay-change MRs
+metrics:
+  jira_summary: one_line                # one_line | none
+  story_retro: {po_rejection: true, defect_rounds_at_least: 2, over_budget: true, human_wait_share_above: 0.6}
+  sprint_rollup: on_read
+improvement:
+  recurrence_threshold: 2              # N matching retros before Coach (b) opens an MR
+  open_mrs: one_per_agent
+  effect_check: {min_sessions_each_side: 5, max_sprints: 2,
+                 guardrails: [ai_credits_per_session, takeover_rate, defect_rounds],
+                 exclude: [fallback_model, takeover]}
+  on_worse: draft_revert_mr
+gates: {proposal_approval: human, story_acceptance: human}
+limits: {review_rounds: 2, defect_rounds: 3, concurrency: 2,        # concurrency per machine
+         ai_credits_per_story: 4000, max_turns_per_session: 60}
+budget:
+  personal_reserve: {stop_at_share: 0.7, monthly_allowance_default: 50000}   # AI credits per dev per month (Q2); per-dev override in ~/.sdlc/config.yaml
+  warn_at_share: 0.8
+  credit_rates: {"<model id>": "<AI credits per call>"}   # used only if Copilot doesn't report AI credits per session
+questions:
+  routes: {requirement: po, technical: responsible_dev, test: qe, environment: sm}
+  live_wait_minutes: 20
+  sla_hours: 8
+  policy: {planner: always_ask, developer: assume_if_low_risk, qe: assume_if_low_risk}
+  notify: {webhook: "${TEAMS_WEBHOOK}"}   # Microsoft Teams channel webhook (Q15)
+telemetry: {enabled: true, capture_content: false, retention_days: 90}
+agents:
+  planner:   {model: "<strong model id>"}
+  developer: {model: "<copilot model id>"}   # fallback_model: not set in Phase 1, so 100% of a budget means blocked: budget
+  coach:     {enabled: true}
+qe:                                     # plan §4a overlay knobs
+  automation: required
+  regression_scope: affected
+  local_env:                            # QE (c), on the owner's machine (Q10, Q19: Docker; the SM writes local-stack/)
+    up: "docker compose -f .sdlc/team/local-stack/compose.yaml up -d --wait"
+    down: "docker compose -f .sdlc/team/local-stack/compose.yaml down -v"
+    base_url: "http://localhost:8080"
+  preprod:
+    wait_for: {pipeline_ref: main, job: "deploy_preprod"}   # Q19
+    base_url: "https://preprod.<your-org>.com"
+    lease: preprod

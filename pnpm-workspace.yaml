@@ -4,3 +4,4 @@ packages:
   - "packs/*"
 allowBuilds:
   nx: true
+  esbuild: true

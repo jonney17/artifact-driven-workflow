@@ -34,6 +34,8 @@ export const ContractOutputSchema = z.object({
   multiple: z.boolean().default(false),
   /** Each emitted artifact gets the next free number in its id (e.g. `defect-PAY-1-api-2`). */
   numbered: z.boolean().default(false),
+  /** Whether the contract's gate applies to this output (default: yes, when the contract has a gate). */
+  gated: z.boolean().default(true),
   /** Not producing it is fine (e.g. defects when everything passes). */
   optional: z.boolean().default(false),
   /** `Verdict: <value>` in the body sets the status, and may emit a rework input of the given type. */

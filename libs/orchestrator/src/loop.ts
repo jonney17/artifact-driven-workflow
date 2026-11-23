@@ -76,7 +76,8 @@ export class EngineLoop {
     );
 
     if (owned.length) {
-      const paths = owned.flatMap((s) => [`${workRel}/stories/${s.key}`, `${workRel}/retro/${s.key}`]);
+      // own stories and retros, plus topic snapshots (keyed by page version, so engines never conflict)
+      const paths = [...owned.flatMap((s) => [`${workRel}/stories/${s.key}`, `${workRel}/retro/${s.key}`]), `${workRel}/topics`];
       report.pushed = await ws.commitAndPush(`sdlc: update ${report.owned.join(', ')}`, paths);
     }
     return report;
